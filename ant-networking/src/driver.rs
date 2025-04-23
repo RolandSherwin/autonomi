@@ -57,7 +57,7 @@ use libp2p::{swarm::SwarmEvent, Transport as _};
 use prometheus_client::metrics::info::Info;
 use rand::Rng;
 use std::{
-    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{btree_map::Entry, BTreeMap, HashMap, HashSet},
     convert::TryInto,
     fmt::Debug,
     fs,
@@ -711,7 +711,7 @@ pub struct SwarmDriver {
     pub(crate) pending_get_record: PendingGetRecord,
     /// A list of the most recent peers we have dialed ourselves. Old dialed peers are evicted once the vec fills up.
     pub(crate) dialed_peers: CircularVec<PeerId>,
-    pub(crate) dial_queue: VecDeque<(PeerId, Addresses, Instant)>,
+    pub(crate) dial_queue: HashMap<PeerId, (Addresses, Instant)>,
     // Peers that having live connection to. Any peer got contacted during kad network query
     // will have live connection established. And they may not appear in the RT.
     pub(crate) live_connected_peers: BTreeMap<ConnectionId, (PeerId, Multiaddr, Instant)>,
@@ -842,10 +842,10 @@ impl SwarmDriver {
                     let mut to_remove = vec![];
                     // check if we can dial any peer in the dial queue
                     // if we have no peers in the dial queue, skip this check
-                    for (idx, (peer_id, addrs, wait_time)) in self.dial_queue.iter().enumerate() {
+                    for (peer_id, (addrs, wait_time)) in self.dial_queue.iter() {
                         if now > *wait_time {
                             info!("Dialing peer {peer_id:?} from dial queue with addresses {addrs:?}");
-                            to_remove.push(idx);
+                            to_remove.push(*peer_id);
                             if let Err(err) = self.swarm.dial(
                                 DialOpts::peer_id(*peer_id)
                                     .condition(PeerCondition::NotDialing)
@@ -857,8 +857,8 @@ impl SwarmDriver {
                         }
                     }
 
-                    for idx in to_remove.iter().rev() {
-                        self.dial_queue.remove(*idx);
+                    for peer_id in to_remove.iter() {
+                        self.dial_queue.remove(peer_id);
                     }
                 },
 
