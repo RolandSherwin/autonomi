@@ -17,10 +17,7 @@ use color_eyre::eyre::{eyre, Context, Result};
 use color_eyre::Section;
 use std::path::PathBuf;
 
-pub async fn cost(
-    file: &str,
-    network_context: NetworkContext,
-) -> Result<()> {
+pub async fn cost(file: &str, network_context: NetworkContext) -> Result<()> {
     let client = crate::actions::connect_to_network(network_context)
         .await
         .map_err(|(err, _)| err)?;
@@ -50,8 +47,7 @@ pub async fn upload(
         config.chunks.verification_quorum = verification_quorum;
     }
     let mut client =
-        crate::actions::connect_to_network_with_config(network_context, config)
-            .await?;
+        crate::actions::connect_to_network_with_config(network_context, config).await?;
 
     let mut wallet = load_wallet(client.evm_network()).map_err(|err| (err, IO_ERROR))?;
 
@@ -160,9 +156,7 @@ pub async fn download(
     if let Some(quorum) = quorum {
         config.chunks.get_quorum = quorum;
     }
-    let client =
-        crate::actions::connect_to_network_with_config(network_context, config)
-            .await?;
+    let client = crate::actions::connect_to_network_with_config(network_context, config).await?;
     crate::actions::download(addr, dest_path, &client).await
 }
 

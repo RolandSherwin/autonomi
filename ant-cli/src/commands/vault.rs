@@ -14,10 +14,7 @@ use color_eyre::eyre::Context;
 use color_eyre::eyre::Result;
 use color_eyre::Section;
 
-pub async fn cost(
-    network_context: NetworkContext,
-    expected_max_size: u64,
-) -> Result<()> {
+pub async fn cost(network_context: NetworkContext, expected_max_size: u64) -> Result<()> {
     let client = crate::actions::connect_to_network(network_context)
         .await
         .map_err(|(err, _)| err)?;
@@ -35,10 +32,7 @@ pub async fn cost(
     Ok(())
 }
 
-pub async fn create(
-    network_context: NetworkContext,
-    max_fee_per_gas: Option<u128>,
-) -> Result<()> {
+pub async fn create(network_context: NetworkContext, max_fee_per_gas: Option<u128>) -> Result<()> {
     let client = crate::actions::connect_to_network(network_context)
         .await
         .map_err(|(err, _)| err)?;
@@ -70,10 +64,7 @@ pub async fn create(
     Ok(())
 }
 
-pub async fn sync(
-    force: bool,
-    network_context: NetworkContext,
-) -> Result<()> {
+pub async fn sync(force: bool, network_context: NetworkContext) -> Result<()> {
     let client = crate::actions::connect_to_network(network_context)
         .await
         .map_err(|(err, _)| err)?;

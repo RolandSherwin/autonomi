@@ -37,10 +37,7 @@ pub fn generate_key(overwrite: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn cost(
-    name: &str,
-    network_context: NetworkContext,
-) -> Result<()> {
+pub async fn cost(name: &str, network_context: NetworkContext) -> Result<()> {
     let main_registers_key = crate::keys::get_register_signing_key()
         .wrap_err("The register key is required to perform this action")?;
     let client = crate::actions::connect_to_network(network_context)

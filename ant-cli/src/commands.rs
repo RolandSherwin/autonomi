@@ -245,7 +245,7 @@ pub enum WalletCmd {
 
 pub async fn handle_subcommand(opt: Opt) -> Result<()> {
     let cmd = opt.command;
-    
+
     let network_context = if let Some(network_id) = opt.network_id {
         NetworkContext::new(opt.peers, network_id)
     } else if opt.alpha {
@@ -263,14 +263,8 @@ pub async fn handle_subcommand(opt: Opt) -> Result<()> {
                 quorum,
                 max_fee_per_gas,
             } => {
-                if let Err((err, exit_code)) = file::upload(
-                    &file,
-                    public,
-                    network_context,
-                    quorum,
-                    max_fee_per_gas,
-                )
-                .await
+                if let Err((err, exit_code)) =
+                    file::upload(&file, public, network_context, quorum, max_fee_per_gas).await
                 {
                     eprintln!("{err:?}");
                     std::process::exit(exit_code);
@@ -302,33 +296,14 @@ pub async fn handle_subcommand(opt: Opt) -> Result<()> {
                 value,
                 hex,
                 max_fee_per_gas,
-            } => {
-                register::create(
-                    &name,
-                    &value,
-                    hex,
-                    network_context,
-                    max_fee_per_gas,
-                )
-                .await
-            }
+            } => register::create(&name, &value, hex, network_context, max_fee_per_gas).await,
             RegisterCmd::Edit {
                 address,
                 name,
                 value,
                 hex,
                 max_fee_per_gas,
-            } => {
-                register::edit(
-                    address,
-                    name,
-                    &value,
-                    hex,
-                    network_context,
-                    max_fee_per_gas,
-                )
-                .await
-            }
+            } => register::edit(address, name, &value, hex, network_context, max_fee_per_gas).await,
             RegisterCmd::Get { address, name, hex } => {
                 register::get(address, name, hex, network_context).await
             }

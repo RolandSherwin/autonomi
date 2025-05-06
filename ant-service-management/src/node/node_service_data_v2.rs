@@ -193,4 +193,4 @@ impl From<NodeServiceDataV1> for NodeServiceDataV2 {
             alpha: false, // Default value for upgraded instances
         }
     }
-} 
+}

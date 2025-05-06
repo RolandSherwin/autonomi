@@ -6626,12 +6626,7 @@ network_id: None,
             })
             .await?;
 
-        assert!(
-            service_manager
-                .service
-                .service_data
-                .alpha
-        );
+        assert!(service_manager.service.service_data.alpha);
 
         Ok(())
     }

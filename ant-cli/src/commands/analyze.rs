@@ -7,18 +7,11 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::actions::NetworkContext;
-use autonomi::{
-    client::analyze::AnalysisError, Multiaddr, RewardsAddress, SecretKey,
-    Wallet,
-};
+use autonomi::{client::analyze::AnalysisError, Multiaddr, RewardsAddress, SecretKey, Wallet};
 use color_eyre::eyre::Result;
 use std::str::FromStr;
 
-pub async fn analyze(
-    addr: &str,
-    verbose: bool,
-    network_context: NetworkContext,
-) -> Result<()> {
+pub async fn analyze(addr: &str, verbose: bool, network_context: NetworkContext) -> Result<()> {
     macro_rules! println_if_verbose {
         ($($arg:tt)*) => {
             if verbose {

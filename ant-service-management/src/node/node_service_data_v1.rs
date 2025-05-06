@@ -32,8 +32,10 @@ pub struct NodeServiceDataV1 {
     pub antnode_path: PathBuf,
     #[serde(default)]
     pub auto_restart: bool,
-    #[serde(serialize_with = "NodeServiceData::serialize_connected_peers", 
-            deserialize_with = "NodeServiceData::deserialize_connected_peers")]
+    #[serde(
+        serialize_with = "NodeServiceData::serialize_connected_peers",
+        deserialize_with = "NodeServiceData::deserialize_connected_peers"
+    )]
     pub connected_peers: Option<Vec<PeerId>>,
     pub data_dir_path: PathBuf,
     #[serde(default)]
@@ -55,8 +57,10 @@ pub struct NodeServiceDataV1 {
     /// Renamed `upnp` to `no_upnp`.
     pub no_upnp: bool,
     pub number: u16,
-    #[serde(serialize_with = "NodeServiceData::serialize_peer_id",
-            deserialize_with = "NodeServiceData::deserialize_peer_id")]
+    #[serde(
+        serialize_with = "NodeServiceData::serialize_peer_id",
+        deserialize_with = "NodeServiceData::deserialize_peer_id"
+    )]
     pub peer_id: Option<PeerId>,
     pub pid: Option<u32>,
     /// Renamed `home_network` to `relay`.
