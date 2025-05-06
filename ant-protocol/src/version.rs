@@ -59,18 +59,53 @@ pub static IDENTIFY_PROTOCOL_STR: LazyLock<RwLock<String>> = LazyLock::new(|| {
     ))
 });
 
-/// Update the NETWORK_ID. The other version strings will reference this value.
-/// By default, the network id is set to 1 which represents the mainnet.
+/// Update the NETWORK_ID.
 ///
-/// This should be called before starting the node or client.
-/// The values will be read often and this can cause issues if the values are changed after the node is started.
+/// Other version strings will reference this value.  The default is 1, representing the mainnet.
+///
+/// This function should be used sparingly, ideally before the node or client is started.
+///
+/// Each of the version strings need to be explicitly updated here. There are scenarios where they
+/// could be read before this function is called, in which case they will have the old value for
+/// the lifetime of the program.
 pub fn set_network_id(id: u8) {
     info!("Setting network id to: {id}");
-    let mut network_id = NETWORK_ID
-        .write()
-        .expect("Failed to obtain write lock for NETWORK_ID");
-    *network_id = id;
-    info!("Network id set to: {id}");
+    {
+        let mut network_id = NETWORK_ID
+            .write()
+            .expect("Failed to obtain write lock for NETWORK_ID");
+        *network_id = id;
+    }
+
+    {
+        let mut identify_node = IDENTIFY_NODE_VERSION_STR
+            .write()
+            .expect("Failed to obtain write lock for IDENTIFY_NODE_VERSION_STR");
+        *identify_node = format!("ant/node/{}/{}", get_truncate_version_str(), id);
+    }
+
+    {
+        let mut identify_client = IDENTIFY_CLIENT_VERSION_STR
+            .write()
+            .expect("Failed to obtain write lock for IDENTIFY_CLIENT_VERSION_STR");
+        *identify_client = format!("ant/client/{}/{}", get_truncate_version_str(), id);
+    }
+
+    {
+        let mut req_response = REQ_RESPONSE_VERSION_STR
+            .write()
+            .expect("Failed to obtain write lock for REQ_RESPONSE_VERSION_STR");
+        *req_response = format!("/ant/{}/{}", get_truncate_version_str(), id);
+    }
+
+    {
+        let mut identify_protocol = IDENTIFY_PROTOCOL_STR
+            .write()
+            .expect("Failed to obtain write lock for IDENTIFY_PROTOCOL_STR");
+        *identify_protocol = format!("ant/{}/{}", get_truncate_version_str(), id);
+    }
+
+    info!("Network id set to: {id} and all protocol strings updated");
 }
 
 /// Get the current NETWORK_ID as string.
