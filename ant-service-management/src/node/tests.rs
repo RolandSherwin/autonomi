@@ -10,7 +10,6 @@
 use super::{
     node_service_data::NodeServiceData,
     node_service_data_v1::{NodeServiceDataV1, NODE_SERVICE_DATA_SCHEMA_V1},
-    node_service_data_v2::{NodeServiceDataV2, NODE_SERVICE_DATA_SCHEMA_V2},
 };
 use crate::ServiceStatus;
 use ant_bootstrap::InitialPeersConfig;
@@ -110,7 +109,7 @@ fn test_deserialize_v1_format() {
     );
     let data = service_data.unwrap();
 
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
+    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V1);
     assert_eq!(data.service_name, "safenode-1");
     assert_eq!(data.node_port, Some(56215));
     assert!(!data.no_upnp);
@@ -138,7 +137,7 @@ fn test_deserialize_v0_format() {
     );
     let data = service_data.unwrap();
 
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
+    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V1);
 
     assert!(data.relay);
     assert!(!data.no_upnp);
@@ -255,7 +254,7 @@ fn test_v0_to_v1_field_transformations() {
 #[test]
 fn test_backward_compatibility_with_deprecated_fields() {
     let json_with_deprecated_field = serde_json::json!({
-        "schema_version": NODE_SERVICE_DATA_SCHEMA_V2,
+        "schema_version": NODE_SERVICE_DATA_SCHEMA_V1,
         "antnode_path": "/usr/bin/antnode",
         "auto_restart": true,
         "connected_peers": [
@@ -309,7 +308,7 @@ fn test_backward_compatibility_with_deprecated_fields() {
 
     let data = service_data.unwrap();
 
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
+    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V1);
     assert_eq!(data.service_name, "safenode-1");
     assert_eq!(data.node_port, Some(56215));
 
@@ -336,104 +335,4 @@ fn test_direct_v1_deserialization() {
 
     assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V1);
     assert_eq!(data.service_name, "safenode-1");
-}
-
-#[test]
-fn test_deserialize_v2_format() {
-    let test_data = create_test_v2_struct();
-    let json_data = serde_json::to_value(&test_data).unwrap();
-    let service_data: Result<NodeServiceData, _> = serde_json::from_value(json_data);
-
-    assert!(
-        service_data.is_ok(),
-        "Failed to deserialize V2 format: {:?}",
-        service_data.err()
-    );
-    let data = service_data.unwrap();
-
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
-    assert_eq!(data.service_name, "safenode-1");
-    assert_eq!(data.node_port, Some(56215));
-    assert!(!data.no_upnp);
-    assert!(data.relay);
-    assert!(data.alpha);
-
-    let expected_peer_id =
-        PeerId::from_str("12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN").unwrap();
-    assert_eq!(data.peer_id, Some(expected_peer_id));
-}
-
-#[test]
-fn test_v1_to_v2_upgrade() {
-    let v1_struct = create_test_v1_struct();
-    let v1_json = serde_json::to_value(v1_struct).unwrap();
-
-    let service_data: Result<NodeServiceData, _> = serde_json::from_value(v1_json);
-
-    assert!(
-        service_data.is_ok(),
-        "Failed to deserialize V1 and upgrade to V2: {:?}",
-        service_data.err()
-    );
-
-    let data = service_data.unwrap();
-
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
-
-    assert!(!data.alpha);
-
-    assert_eq!(data.service_name, "safenode-1");
-    assert_eq!(data.node_port, Some(56215));
-    assert!(data.relay);
-}
-
-#[test]
-fn test_v0_to_v2_upgrade() {
-    let v0_json = create_test_v0_json();
-
-    let service_data: Result<NodeServiceData, _> = serde_json::from_value(v0_json);
-
-    assert!(
-        service_data.is_ok(),
-        "Failed to deserialize V0 and upgrade to V2: {:?}",
-        service_data.err()
-    );
-
-    let data = service_data.unwrap();
-
-    assert_eq!(data.schema_version, NODE_SERVICE_DATA_SCHEMA_V2);
-
-    assert!(!data.alpha);
-
-    assert_eq!(data.service_name, "safenode-1");
-    assert_eq!(data.node_port, Some(56215));
-    assert!(data.relay);
-}
-
-#[test]
-fn test_alpha_field_serialization() {
-    let mut test_data = create_test_v2_struct();
-    test_data.alpha = true;
-
-    let serialized = serde_json::to_value(&test_data).unwrap();
-
-    if let serde_json::Value::Object(map) = &serialized {
-        if let Some(alpha) = map.get("alpha") {
-            assert!(alpha.is_boolean());
-            assert!(alpha.as_bool().unwrap());
-        } else {
-            panic!("alpha field missing from serialized output");
-        }
-    } else {
-        panic!("Serialized output is not an object");
-    }
-
-    let deserialized: NodeServiceData = serde_json::from_value(serialized).unwrap();
-    assert!(deserialized.alpha);
-}
-
-fn create_test_v2_struct() -> NodeServiceDataV2 {
-    let mut v2 = NodeServiceDataV2::from(create_test_v1_struct());
-    v2.alpha = true;
-    v2
 }

@@ -24,7 +24,7 @@ fn schema_v1_value() -> u32 {
     NODE_SERVICE_DATA_SCHEMA_V1
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct NodeServiceDataV1 {
     #[serde(default = "schema_v1_value")]
     /// Added schema version to the struct to handle future changes.

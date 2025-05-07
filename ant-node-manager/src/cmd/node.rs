@@ -21,6 +21,7 @@ use crate::{
 use ant_bootstrap::InitialPeersConfig;
 use ant_evm::{EvmNetwork, RewardsAddress};
 use ant_logging::LogFormat;
+use ant_protocol::version::ALPHANET_ID;
 use ant_releases::{AntReleaseRepoActions, ReleaseType};
 use ant_service_management::{
     control::{ServiceControl, ServiceController},
@@ -49,7 +50,7 @@ pub async fn add(
     max_archived_log_files: Option<usize>,
     max_log_files: Option<usize>,
     metrics_port: Option<PortRange>,
-    network_id: Option<u8>,
+    mut network_id: Option<u8>,
     node_ip: Option<Ipv4Addr>,
     node_port: Option<PortRange>,
     mut init_peers_config: InitialPeersConfig,
@@ -69,6 +70,15 @@ pub async fn add(
     if verbosity != VerbosityLevel::Minimal {
         print_banner("Add Antnode Services");
         println!("{} service(s) to be added", count.unwrap_or(1));
+    }
+
+    if alpha && network_id.is_some() {
+        return Err(eyre!(
+            "Both `--alpha` and `--network_id` cannot be used at the same time"
+        ));
+    }
+    if alpha {
+        network_id = Some(ALPHANET_ID);
     }
 
     let service_manager = ServiceController {};
@@ -116,7 +126,6 @@ pub async fn add(
     init_peers_config.bootstrap_cache_dir = bootstrap_cache_dir;
 
     let options = AddNodeServiceOptions {
-        alpha,
         auto_restart,
         auto_set_nat_flags,
         count,

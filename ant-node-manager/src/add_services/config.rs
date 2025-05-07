@@ -70,7 +70,6 @@ impl PortRange {
 
 #[derive(Debug, PartialEq)]
 pub struct InstallNodeServiceCtxBuilder {
-    pub alpha: bool,
     pub antnode_path: PathBuf,
     pub autostart: bool,
     pub data_dir_path: PathBuf,
@@ -106,9 +105,6 @@ impl InstallNodeServiceCtxBuilder {
         ];
 
         push_arguments_from_initial_peers_config(&self.init_peers_config, &mut args);
-        if self.alpha {
-            args.push(OsString::from("--alpha"));
-        }
         if let Some(id) = self.network_id {
             args.push(OsString::from("--network-id"));
             args.push(OsString::from(id.to_string()));
@@ -176,7 +172,6 @@ impl InstallNodeServiceCtxBuilder {
 }
 
 pub struct AddNodeServiceOptions {
-    pub alpha: bool,
     pub antnode_dir_path: PathBuf,
     pub antnode_src_path: PathBuf,
     pub auto_restart: bool,
@@ -314,7 +309,6 @@ mod tests {
 
     fn create_default_builder() -> InstallNodeServiceCtxBuilder {
         InstallNodeServiceCtxBuilder {
-            alpha: false,
             antnode_path: PathBuf::from("/bin/antnode"),
             autostart: true,
             data_dir_path: PathBuf::from("/data"),
@@ -341,7 +335,6 @@ mod tests {
 
     fn create_custom_evm_network_builder() -> InstallNodeServiceCtxBuilder {
         InstallNodeServiceCtxBuilder {
-            alpha: false,
             autostart: true,
             data_dir_path: PathBuf::from("/data"),
             env_variables: None,
@@ -378,7 +371,6 @@ mod tests {
 
     fn create_builder_with_all_options_enabled() -> InstallNodeServiceCtxBuilder {
         InstallNodeServiceCtxBuilder {
-            alpha: true,
             autostart: true,
             data_dir_path: PathBuf::from("/data"),
             env_variables: None,
@@ -486,7 +478,6 @@ mod tests {
     #[test]
     fn build_should_assign_expected_values_when_all_options_are_enabled() {
         let mut builder = create_builder_with_all_options_enabled();
-        builder.alpha = true;
         builder.relay = true;
         builder.log_format = Some(LogFormat::Json);
         builder.no_upnp = true;
@@ -520,7 +511,6 @@ mod tests {
             "--network-contacts-url",
             "http://localhost:8080",
             "--ignore-cache",
-            "--alpha",
             "--network-id",
             "5",
             "--relay",

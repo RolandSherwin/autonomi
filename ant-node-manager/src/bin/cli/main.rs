@@ -78,7 +78,7 @@ pub enum SubCmd {
     #[clap(name = "add")]
     Add {
         /// Set if you want the service to connect to the alpha network.
-        #[clap(long, default_value_t = false)]
+        #[clap(long, default_value_t = false, conflicts_with = "network_id")]
         alpha: bool,
         /// Set to automatically restart antnode services upon OS reboot.
         ///
@@ -176,7 +176,7 @@ pub enum SubCmd {
         /// Specify the network ID to use for the services. This will allow you to run the node on a different network.
         ///
         /// By default, the network ID is set to 1, which represents the mainnet.
-        #[clap(long, verbatim_doc_comment)]
+        #[clap(long, verbatim_doc_comment, conflicts_with = "alpha")]
         network_id: Option<u8>,
         /// Specify the IP address for the antnode service(s).
         ///
