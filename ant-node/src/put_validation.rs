@@ -9,8 +9,7 @@
 use std::collections::BTreeSet;
 
 use crate::{error::PutValidationError, node::Node, Marker};
-use ant_evm::payment_vault::verify_data_payment;
-use ant_evm::ProofOfPayment;
+use ant_evm::{payment_vault::verify_data_payment, ProofOfPayment};
 use ant_protocol::storage::GraphEntry;
 use ant_protocol::{
     storage::{
