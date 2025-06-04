@@ -39,6 +39,9 @@ use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 use std::time::Instant;
 
+#[cfg(feature = "open-metrics")]
+use crate::networking::metrics::NetworkMetricsRecorder;
+
 pub(crate) const MAX_DIAL_ATTEMPTS: usize = 5;
 const MAX_WORKFLOW_ATTEMPTS: usize = 3;
 
@@ -98,6 +101,8 @@ pub(crate) struct ReachabilityCheckSwarmDriver {
     pub(crate) upnp_supported: bool,
     pub(crate) dial_manager: DialManager,
     pub(crate) listeners: HashMap<ListenerId, HashSet<IpAddr>>,
+    #[cfg(feature = "open-metrics")]
+    pub(crate) metrics_recorder: Option<NetworkMetricsRecorder>,
 }
 
 impl ReachabilityCheckSwarmDriver {
@@ -109,6 +114,7 @@ impl ReachabilityCheckSwarmDriver {
         swarm: Swarm<ReachabilityCheckBehaviour>,
         initial_contacts: Vec<Multiaddr>,
         listen_socket_addr: SocketAddr,
+        #[cfg(feature = "open-metrics")] metrics_recorder: Option<NetworkMetricsRecorder>,
     ) -> Self {
         let mut swarm = swarm;
 
@@ -128,6 +134,7 @@ impl ReachabilityCheckSwarmDriver {
             dial_manager: DialManager::new(initial_contacts),
             upnp_supported: false,
             listeners,
+            metrics_recorder,
         }
     }
     /// Runs the reachability check workflow.
@@ -372,6 +379,13 @@ impl ReachabilityCheckSwarmDriver {
 
                 debug!("SwarmEvent has been ignored: {other:?}")
             }
+        }
+
+        #[cfg(feature = "open-metrics")]
+        if let Some(metrics_recorder) = &self.metrics_recorder {
+            let _ = metrics_recorder
+                .connected_peers
+                .set(self.swarm.connected_peers().count() as i64);
         }
 
         trace!(

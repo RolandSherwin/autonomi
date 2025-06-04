@@ -6,8 +6,8 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-// Implementation to record `libp2p::upnp::Event` metrics
 mod bad_node;
+mod metadata;
 mod relay_client;
 pub(super) mod service;
 mod upnp;
@@ -20,6 +20,7 @@ use bad_node::TimeFrame;
 use libp2p::PeerId;
 use libp2p::metrics::Metrics as Libp2pMetrics;
 use libp2p::metrics::Recorder;
+pub(crate) use metadata::MetadataRecorder;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;

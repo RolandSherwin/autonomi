@@ -450,8 +450,7 @@ async fn run_node(
         }
     }
 
-    let running_node = node_builder.build_and_run()?;
-
+    let running_node = node_builder.build_and_run().await?;
     println!(
         "
 Node started
