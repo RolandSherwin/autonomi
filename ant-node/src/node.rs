@@ -495,7 +495,13 @@ impl Node {
                 let _handle = spawn(async move {
                     let key = PrettyPrintRecordKey::from(&record.key).into_owned();
                     match self_clone.validate_and_store_record(record).await {
-                        Ok(()) => debug!("UnverifiedRecord {key} has been stored"),
+                        Ok(()) => {
+                            debug!("UnverifiedRecord {key} has been stored");
+                            self_clone.record_metrics(Marker::RecordRejected(
+                                &key,
+                                &crate::PutValidationError::LocalSwarmError,
+                            ));
+                        }
                         Err(err) => {
                             self_clone.record_metrics(Marker::RecordRejected(&key, &err));
                         }
