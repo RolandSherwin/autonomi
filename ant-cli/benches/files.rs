@@ -33,6 +33,7 @@ const DEFAULT_WALLET_PRIVATE_KEY: &str =
 fn autonomi_file_upload(dir: &str) -> String {
     let autonomi_cli_path = get_cli_path();
     let output = Command::new(autonomi_cli_path)
+        .arg("--local")
         .arg("file")
         .arg("upload")
         .arg(dir)
@@ -61,6 +62,7 @@ fn autonomi_file_download(uploaded_files: HashSet<String>) {
     let temp_dir = tempdir().expect("Failed to create temp dir");
     for address in uploaded_files.iter() {
         let output = Command::new(autonomi_cli_path.clone())
+            .arg("--local")
             .arg("file")
             .arg("download")
             .arg(address)
@@ -99,7 +101,7 @@ fn get_cli_path() -> PathBuf {
         path.push("target");
     }
     path.push("release");
-    path.push("autonomi");
+    path.push("ant");
     path
 }
 
@@ -121,16 +123,19 @@ fn criterion_benchmark(c: &mut Criterion) {
     for size in sizes.iter() {
         let temp_dir = tempdir().expect("Failed to create temp dir");
         let temp_dir_path = temp_dir.keep();
-        let temp_dir_path_str = temp_dir_path.to_str().expect("Invalid unicode encountered");
 
         // create 23 random files. This is to keep the benchmark results consistent with prior runs. The change to make
         // use of ChunkManager means that we don't upload the same file twice and the `uploaded_files` file is now read
         // as a set and we don't download the same file twice. Hence create 23 files as counted from the logs
         // pre ChunkManager change.
-        (0..23).into_par_iter().for_each(|idx| {
-            let path = temp_dir_path.join(format!("random_file_{size}_mb_{idx}"));
-            generate_file(&path, *size as usize);
-        });
+        let file_paths: Vec<PathBuf> = (0..23)
+            .into_par_iter()
+            .map(|idx| {
+                let path = temp_dir_path.join(format!("random_file_{size}_mb_{idx}"));
+                generate_file(&path, *size as usize);
+                path
+            })
+            .collect();
 
         // Wait little bit for the fund to be settled.
         std::thread::sleep(Duration::from_secs(10));
@@ -144,12 +149,20 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.warm_up_time(Duration::from_secs(5));
         group.sample_size(SAMPLE_SIZE);
 
+        // Create an iterator that cycles through the file paths
+        let mut file_path_iter = file_paths.iter().cycle();
+
         // Set the throughput to be reported in terms of bytes
         group.throughput(Throughput::Bytes(size * 1024 * 1024));
-        let bench_id = format!("autonomi files upload {size}mb");
+        let bench_id = format!("ant files upload {size}mb");
         group.bench_function(bench_id, |b| {
             b.iter(|| {
-                let uploaded_address = autonomi_file_upload(temp_dir_path_str);
+                let file_path = file_path_iter.next().expect("Temp files drained up.");
+                let uploaded_address = autonomi_file_upload(
+                    file_path
+                        .to_str()
+                        .expect("Invalid temp file path encountered"),
+                );
                 uploaded_files.insert(uploaded_address);
             })
         });
@@ -177,7 +190,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // Set the throughput to be reported in terms of bytes
     group.throughput(Throughput::Bytes(total_size * 1024 * 1024));
-    let bench_id = "autonomi files download".to_string();
+    let bench_id = "ant files download".to_string();
     group.bench_function(bench_id, |b| {
         b.iter(|| autonomi_file_download(uploaded_files.clone()))
     });
