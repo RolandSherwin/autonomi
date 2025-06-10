@@ -382,6 +382,7 @@ impl NetworkBuilder {
             swarm,
             self.initial_contacts,
             listen_socket_addr,
+            #[cfg(feature = "open-metrics")]
             metrics_recorder,
         );
 
