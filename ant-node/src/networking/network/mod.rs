@@ -29,6 +29,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 use crate::networking::NetworkEvent;
 
@@ -67,13 +68,20 @@ impl Network {
     /// Initialize the network
     /// This will start the network driver in a background thread, which is a long-running task that runs until the [`Network`] is dropped
     /// The [`Network`] is cheaply cloneable, prefer cloning over creating new instances to avoid creating multiple network drivers
-    pub(crate) fn init(config: NetworkConfig) -> Result<(Self, mpsc::Receiver<NetworkEvent>)> {
+    pub(crate) fn init(
+        config: NetworkConfig,
+    ) -> Result<(
+        Self,
+        mpsc::Receiver<NetworkEvent>,
+        Option<watch::Sender<bool>>,
+    )> {
         let peer_id = PeerId::from(config.keypair.public());
         let keypair = config.keypair.clone();
         let shutdown_rx = config.shutdown_rx.clone();
 
         // setup the swarm driver
-        let (swarm_driver, network_event_receiver) = init::init_driver(config)?;
+        let (swarm_driver, network_event_receiver, metrics_shutdown_tx) =
+            init::init_driver(config)?;
 
         // create a new network instance
         let network = Network {
@@ -88,7 +96,7 @@ impl Network {
         // Run the swarm driver as a background task
         let _swarm_driver_task = tokio::spawn(swarm_driver.run(shutdown_rx));
 
-        Ok((network, network_event_receiver))
+        Ok((network, network_event_receiver, metrics_shutdown_tx))
     }
 
     /// Returns the `PeerId` of the instance.
