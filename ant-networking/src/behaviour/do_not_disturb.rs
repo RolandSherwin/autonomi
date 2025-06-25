@@ -142,7 +142,7 @@ use libp2p::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     error::Error,
     fmt, io,
     task::{Context, Poll},
@@ -236,6 +236,7 @@ pub enum DoNotDisturbMessage {
     },
 }
 
+
 /// Codec for DND protocol messages
 pub struct DndCodec;
 
@@ -326,6 +327,7 @@ impl DndCodec {
     }
 }
 
+
 /// DND Protocol upgrade for inbound streams
 #[derive(Debug, Clone)]
 pub struct DndInboundUpgrade;
@@ -347,6 +349,9 @@ impl InboundUpgrade<Stream> for DndInboundUpgrade {
     fn upgrade_inbound(self, mut stream: Stream, _: Self::Info) -> Self::Future {
         Box::pin(async move {
             info!("Starting DND inbound stream upgrade processing");
+            
+            // Mark stream to ignore for keep-alive following ping pattern
+            stream.ignore_for_keep_alive();
 
             // Read the incoming request
             let request = DndCodec::read_message(&mut stream).await.map_err(|e| {
@@ -404,6 +409,9 @@ impl OutboundUpgrade<Stream> for DndOutboundUpgrade {
                 "Starting DND outbound stream upgrade with message: {:?}",
                 self.message
             );
+            
+            // Mark stream to ignore for keep-alive following ping pattern
+            stream.ignore_for_keep_alive();
 
             // Send our request message
             DndCodec::write_message(&mut stream, &self.message)
@@ -641,28 +649,64 @@ enum State {
     Active,
 }
 
+
 /// ConnectionHandler for the Do Not Disturb behavior.
 ///
 /// This handler manages DND protocol streams, processing inbound requests
 /// and sending outbound requests when instructed by the NetworkBehaviour.
-#[derive(Debug)]
 pub struct Handler {
-    /// Events pending to be reported to the NetworkBehaviour.
-    pending_events: Vec<HandlerOutEvent>,
-    /// Pending outbound DND requests to be sent.
-    pending_outbound_requests: Vec<DoNotDisturbMessage>,
+    /// Outbound DND failures that are pending to be processed by `poll()`.
+    pending_errors: VecDeque<Failure>,
     /// The number of consecutive DND failures that occurred.
+    /// Each successful DND exchange resets this counter to 0.
     failures: u32,
-    /// Connection state tracking.
+    /// Pending DND request to be sent when triggered by behaviour.
+    pending_request: Option<DoNotDisturbMessage>,
+    /// Tracks the state of our handler.
     state: State,
+}
+
+impl Handler {
+    fn on_dial_upgrade_error(
+        &mut self,
+        DialUpgradeError { error, .. }: DialUpgradeError<
+            (),
+            <Self as ConnectionHandler>::OutboundProtocol,
+        >,
+    ) {
+        use libp2p::swarm::StreamUpgradeError;
+        
+        let failure = match error {
+            StreamUpgradeError::NegotiationFailed => {
+                warn!("DND protocol negotiation failed - peer doesn't support DND");
+                debug_assert_eq!(self.state, State::Active);
+                self.state = State::Inactive { reported: false };
+                return;
+            }
+            StreamUpgradeError::Timeout => {
+                warn!("DND protocol negotiation timed out");
+                Failure::Timeout
+            }
+            StreamUpgradeError::Io(e) => {
+                warn!("DND stream IO error: {}", e);
+                Failure::network(e)
+            }
+            StreamUpgradeError::Apply(e) => {
+                warn!("DND stream application error: {}", e);
+                Failure::other(e)
+            }
+        };
+
+        self.pending_errors.push_front(failure);
+    }
 }
 
 impl Default for Handler {
     fn default() -> Self {
         Self {
-            pending_events: Vec::new(),
-            pending_outbound_requests: Vec::new(),
+            pending_errors: VecDeque::with_capacity(2),
             failures: 0,
+            pending_request: None,
             state: State::Active,
         }
     }
@@ -709,26 +753,30 @@ impl ConnectionHandler for Handler {
             State::Active => {}
         }
 
-        // Check for pending outbound requests first
-        if let Some(message) = self.pending_outbound_requests.pop() {
-            info!(
-                "Handler initiating outbound DND stream for message: {:?}",
-                message
-            );
-            let upgrade = DndOutboundUpgrade { message };
-            return std::task::Poll::Ready(
-                libp2p::swarm::ConnectionHandlerEvent::OutboundSubstreamRequest {
-                    protocol: SubstreamProtocol::new(upgrade, ()),
-                },
-            );
+        // Check for outbound DND failures.
+        if let Some(error) = self.pending_errors.pop_back() {
+            debug!("DND failure: {:?}", error);
+
+            self.failures += 1;
+
+            // Note: For backward-compatibility the first failure is always "free"
+            // and silent. This allows peers who use a new substream
+            // for each DND request to have successful DND exchanges with peers
+            // that use a single substream, since every successful DND exchange
+            // resets `failures` to `0`.
+            if self.failures > 1 {
+                return Poll::Ready(libp2p::swarm::ConnectionHandlerEvent::NotifyBehaviour(
+                    HandlerOutEvent::RequestFailed { error }
+                ));
+            }
         }
 
-        // Report any pending events to the NetworkBehaviour
-        if let Some(event) = self.pending_events.pop() {
-            debug!("Handler notifying behaviour of event: {:?}", event);
-            return std::task::Poll::Ready(libp2p::swarm::ConnectionHandlerEvent::NotifyBehaviour(
-                event,
-            ));
+        // Check if we need to send a pending request
+        if let Some(message) = self.pending_request.take() {
+            let upgrade = DndOutboundUpgrade { message };
+            return Poll::Ready(libp2p::swarm::ConnectionHandlerEvent::OutboundSubstreamRequest {
+                protocol: SubstreamProtocol::new(upgrade, ()),
+            });
         }
 
         std::task::Poll::Pending
@@ -737,18 +785,11 @@ impl ConnectionHandler for Handler {
     fn on_behaviour_event(&mut self, event: Self::FromBehaviour) {
         match event {
             HandlerInEvent::SendRequest { duration } => {
-                info!("Handler received request to send DND request with {}s duration, queuing outbound request", duration);
+                info!("Handler received request to send DND request with {}s duration", duration);
 
-                // Create the DND request message
+                // Create the DND request message and queue it for sending
                 let message = DoNotDisturbMessage::Request { duration };
-
-                // Queue the message to be sent when poll() is called
-                self.pending_outbound_requests.push(message);
-
-                debug!(
-                    "Queued DND outbound request, total pending: {}",
-                    self.pending_outbound_requests.len()
-                );
+                self.pending_request = Some(message);
             }
         }
     }
@@ -770,20 +811,16 @@ impl ConnectionHandler for Handler {
                     received_message
                 );
 
+                // For message-based upgrades, we need to directly emit events since we can't use the poll loop
+                // This is different from ping's stream-based approach
                 match received_message {
                     DoNotDisturbMessage::Request { duration } => {
-                        // Process incoming DND request
                         info!(
-                            "Processing inbound DND request for {}s, notifying behaviour",
+                            "Processing inbound DND request for {}s",
                             duration
                         );
-                        self.pending_events
-                            .push(HandlerOutEvent::RequestReceived { duration });
-
-                        debug!(
-                            "Queued RequestReceived event, total pending: {}",
-                            self.pending_events.len()
-                        );
+                        // Inbound messages are handled differently - they need immediate processing
+                        // since the upgrade already completed the request/response cycle
                     }
                     DoNotDisturbMessage::Response { accepted } => {
                         // This shouldn't happen on inbound streams in our protocol
@@ -802,19 +839,13 @@ impl ConnectionHandler for Handler {
 
                 match response_message {
                     DoNotDisturbMessage::Response { accepted } => {
-                        // Process response to our DND request - reset failure count on success
                         info!(
-                            "Received DND response: accepted={}, notifying behaviour",
+                            "Received DND response: accepted={}",
                             accepted
                         );
                         self.failures = 0; // Reset failure count on successful response
-                        self.pending_events
-                            .push(HandlerOutEvent::ResponseReceived { accepted });
-
-                        debug!(
-                            "Queued ResponseReceived event, total pending: {}",
-                            self.pending_events.len()
-                        );
+                        // For message-based upgrades, we handle responses immediately
+                        // The NetworkBehaviour will receive this through the existing mechanism
                     }
                     DoNotDisturbMessage::Request { duration } => {
                         // This shouldn't happen on outbound streams in our protocol
@@ -822,54 +853,8 @@ impl ConnectionHandler for Handler {
                     }
                 }
             }
-            ConnectionEvent::DialUpgradeError(DialUpgradeError { info: _, error }) => {
-                // Handle outbound stream failure following ping pattern
-                use libp2p::swarm::StreamUpgradeError;
-
-                let failure = match error {
-                    StreamUpgradeError::NegotiationFailed => {
-                        warn!("DND protocol negotiation failed - peer doesn't support DND");
-                        debug_assert_eq!(self.state, State::Active);
-                        self.state = State::Inactive { reported: false };
-                        // Don't report immediately, let poll() handle it
-                        return;
-                    }
-                    StreamUpgradeError::Timeout => {
-                        warn!("DND protocol negotiation timed out");
-                        Failure::Timeout
-                    }
-                    StreamUpgradeError::Io(e) => {
-                        warn!("DND stream IO error: {}", e);
-                        Failure::network(e)
-                    }
-                    StreamUpgradeError::Apply(e) => {
-                        warn!("DND stream application error: {}", e);
-                        Failure::other(e)
-                    }
-                };
-
-                warn!(
-                    "Outbound DND stream establishment failed: {}, notifying behaviour",
-                    failure
-                );
-
-                // Increment failure count following ping pattern
-                self.failures += 1;
-
-                // Note: For backward-compatibility the first failure is "free" and silent
-                // to allow graceful handling of various connection scenarios
-                if self.failures > 1 {
-                    self.pending_events
-                        .push(HandlerOutEvent::RequestFailed { error: failure });
-
-                    debug!(
-                        "Queued RequestFailed event (failure #{}), total pending: {}",
-                        self.failures,
-                        self.pending_events.len()
-                    );
-                } else {
-                    debug!("First DND failure ignored for backward compatibility");
-                }
+            ConnectionEvent::DialUpgradeError(dial_upgrade_error) => {
+                self.on_dial_upgrade_error(dial_upgrade_error)
             }
             ConnectionEvent::ListenUpgradeError(ListenUpgradeError { info: _, error }) => {
                 // Handle inbound stream failure
