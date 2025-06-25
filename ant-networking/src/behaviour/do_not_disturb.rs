@@ -6,6 +6,119 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+//! This module implements the `/autonomi/dnd/1.0.0` protocol.
+//!
+//! The Do Not Disturb (DND) protocol can be used to manage outgoing connection blocking
+//! for peers in a libp2p network. It allows peers to request that they be added to
+//! another peer's "do not disturb" list for a specified duration.
+//!
+//! # Protocol Overview
+//!
+//! The DND protocol works by having one peer send a [`DoNotDisturbMessage::Request`] to another
+//! peer, asking to be blocked from outgoing connections for a specified duration. The receiving
+//! peer responds with a [`DoNotDisturbMessage::Response`] indicating whether the request was accepted.
+//!
+//! When a peer is blocked:
+//! - **Outgoing connections** to that peer are denied with a [`DoNotDisturbError`]
+//! - **Incoming connections** from that peer are still allowed
+//! - The block expires automatically after the specified duration
+//! - Blocks can be manually removed using [`Behaviour::unblock_peer`]
+//!
+//! # Usage
+//!
+//! The [`Behaviour`] struct implements the [`NetworkBehaviour`] trait.
+//! It will respond to inbound DND requests and can send outbound DND requests.
+//!
+//! ## Basic Usage
+//!
+//! ```rust,ignore
+//! use std::time::Duration;
+//! use libp2p_identity::PeerId;
+//! use ant_networking::behaviour::do_not_disturb;
+//!
+//! let mut behaviour = do_not_disturb::Behaviour::default();
+//! let peer_id = PeerId::random();
+//!
+//! // Send a DND request to a peer
+//! behaviour.send_do_not_disturb_request(peer_id, 120); // 2 minutes
+//!
+//! // Manually block a peer
+//! behaviour.block_peer(peer_id, Duration::from_secs(300));
+//!
+//! // Check if peer is blocked
+//! if behaviour.is_blocked(&peer_id) {
+//!     println!("Peer is currently blocked");
+//! }
+//!
+//! // Manually unblock if needed
+//! behaviour.unblock_peer(&peer_id);
+//! ```
+//!
+//! ## Event Handling
+//!
+//! The behaviour emits [`DoNotDisturbEvent`]s that should be handled by the application:
+//!
+//! ```rust,ignore
+//! match event {
+//!     DoNotDisturbEvent::RequestReceived { peer, duration } => {
+//!         println!("Received DND request from {peer:?} for {duration}s");
+//!         // The peer is automatically blocked
+//!     }
+//!     DoNotDisturbEvent::ResponseReceived { peer, accepted } => {
+//!         if accepted {
+//!             println!("DND request to {peer:?} was accepted");
+//!         } else {
+//!             println!("DND request to {peer:?} was rejected");
+//!         }
+//!     }
+//!     DoNotDisturbEvent::RequestFailed { peer, error } => {
+//!         println!("Failed to send DND request to {peer:?}: {error}");
+//!     }
+//! }
+//! ```
+//!
+//! ## Connection Management
+//!
+//! When a peer is blocked, any attempt to dial that peer will result in a connection denial:
+//!
+//! ```rust,ignore
+//! match swarm.dial(peer_id) {
+//!     Err(libp2p::swarm::DialError::Denied { cause }) => {
+//!         if let Ok(dnd_error) = cause.downcast::<do_not_disturb::DoNotDisturbError>() {
+//!             println!("Connection denied due to DND: {dnd_error}");
+//!             println!("Remaining time: {}s", dnd_error.remaining_duration.as_secs());
+//!         }
+//!     }
+//!     _ => {}
+//! }
+//! ```
+//!
+//! # Configuration
+//!
+//! - **Maximum Duration**: DND blocks are capped at [`MAX_DO_NOT_DISTURB_DURATION`] (5 minutes)
+//! - **Memory Bounds**: The system tracks at most 10,000 blocked peers to prevent memory exhaustion
+//! - **Protocol**: Uses `/autonomi/dnd/1.0.0` as the protocol identifier
+//!
+//! # Error Handling
+//!
+//! The protocol includes comprehensive error handling with typed failures:
+//!
+//! - [`Failure::Timeout`]: Request timed out
+//! - [`Failure::Unsupported`]: Peer doesn't support DND protocol
+//! - [`Failure::Serialization`]: Message serialization failed
+//! - [`Failure::Network`]: Network/stream error occurred
+//! - [`Failure::Other`]: Other errors
+//!
+//! # Implementation Notes
+//!
+//! - DND blocks persist across connection cycles (reconnecting doesn't reset the block)
+//! - The protocol uses MessagePack (rmp-serde) for message serialization
+//! - Messages are length-prefixed to prevent DoS attacks (max 1024 bytes)
+//! - Connection failures are tracked to prevent spam on broken connections
+//! - Stream management follows libp2p best practices for resource efficiency
+//!
+//! [`NetworkBehaviour`]: libp2p::swarm::NetworkBehaviour
+
 #![allow(dead_code)]
 
 use futures::future::BoxFuture;
@@ -30,6 +143,7 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    error::Error,
     fmt, io,
     task::{Context, Poll},
     time::Duration,
@@ -38,8 +152,73 @@ use tokio::time::Instant;
 
 pub const MAX_DO_NOT_DISTURB_DURATION: u64 = 5 * 60; // 5 minutes
 
+/// Maximum number of blocked peers to track to prevent unbounded memory growth.
+/// This is a reasonable limit for most use cases while preventing DoS via memory exhaustion.
+const MAX_BLOCKED_PEERS: usize = 10_000;
+
 /// The protocol string for the do-not-disturb capability.
 pub const DND_PROTOCOL: StreamProtocol = StreamProtocol::new("/autonomi/dnd/1.0.0");
+
+/// An outbound DND operation failure.
+#[derive(Debug)]
+pub enum Failure {
+    /// The DND request timed out, i.e. no response was received within the configured timeout.
+    Timeout,
+    /// The peer does not support the DND protocol.
+    Unsupported,
+    /// Failed to serialize or deserialize a DND message.
+    Serialization {
+        error: Box<dyn Error + Send + Sync + 'static>,
+    },
+    /// A network or stream error occurred during the DND operation.
+    Network {
+        error: Box<dyn Error + Send + Sync + 'static>,
+    },
+    /// The DND operation failed for other reasons.
+    Other {
+        error: Box<dyn Error + Send + Sync + 'static>,
+    },
+}
+
+impl Failure {
+    /// Create a serialization failure.
+    pub fn serialization(e: impl Error + Send + Sync + 'static) -> Self {
+        Self::Serialization { error: Box::new(e) }
+    }
+
+    /// Create a network failure.
+    pub fn network(e: impl Error + Send + Sync + 'static) -> Self {
+        Self::Network { error: Box::new(e) }
+    }
+
+    /// Create an other failure.
+    pub fn other(e: impl Error + Send + Sync + 'static) -> Self {
+        Self::Other { error: Box::new(e) }
+    }
+}
+
+impl fmt::Display for Failure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Failure::Timeout => f.write_str("DND request timeout"),
+            Failure::Unsupported => f.write_str("DND protocol not supported"),
+            Failure::Serialization { error } => write!(f, "DND serialization error: {error}"),
+            Failure::Network { error } => write!(f, "DND network error: {error}"),
+            Failure::Other { error } => write!(f, "DND error: {error}"),
+        }
+    }
+}
+
+impl Error for Failure {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Failure::Timeout | Failure::Unsupported => None,
+            Failure::Serialization { error }
+            | Failure::Network { error }
+            | Failure::Other { error } => Some(&**error),
+        }
+    }
+}
 
 /// Messages exchanged in the Do Not Disturb protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,7 +452,7 @@ pub enum DoNotDisturbEvent {
         /// The peer we tried to send to.
         peer: PeerId,
         /// The error that occurred.
-        error: String,
+        error: Failure,
     },
 }
 
@@ -318,7 +497,23 @@ impl Behaviour {
     ///
     /// The duration is capped at [`MAX_DO_NOT_DISTURB_DURATION`] seconds.
     /// If the peer is already blocked, this will update the block expiration time.
+    ///
+    /// If the maximum number of blocked peers is reached, the oldest entries are removed.
     pub fn block_peer(&mut self, peer_id: PeerId, duration: Duration) {
+        // Clean up expired entries first
+        self.cleanup_expired();
+
+        // Enforce memory bounds to prevent DoS
+        if self.blocked_peers.len() >= MAX_BLOCKED_PEERS
+            && !self.blocked_peers.contains_key(&peer_id)
+        {
+            // Remove oldest entries by finding the one with earliest unblock time
+            if let Some((&oldest_peer, _)) = self.blocked_peers.iter().min_by_key(|(_, &time)| time)
+            {
+                self.blocked_peers.remove(&oldest_peer);
+                warn!("Removed oldest blocked peer {oldest_peer:?} to enforce memory bounds");
+            }
+        }
         let original_duration = duration.as_secs();
         let capped_duration =
             Duration::from_secs(duration.as_secs().min(MAX_DO_NOT_DISTURB_DURATION));
@@ -431,19 +626,46 @@ pub enum HandlerOutEvent {
     /// A DND response was received for a request we sent.
     ResponseReceived { accepted: bool },
     /// Failed to send a DND request.
-    RequestFailed { error: String },
+    RequestFailed { error: Failure },
+}
+
+/// Connection state for DND protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    /// We are inactive because the other peer doesn't support DND.
+    Inactive {
+        /// Whether or not we've reported the missing support yet.
+        reported: bool,
+    },
+    /// We are actively handling DND with the other peer.
+    Active,
 }
 
 /// ConnectionHandler for the Do Not Disturb behavior.
 ///
 /// This handler manages DND protocol streams, processing inbound requests
 /// and sending outbound requests when instructed by the NetworkBehaviour.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Handler {
     /// Events pending to be reported to the NetworkBehaviour.
     pending_events: Vec<HandlerOutEvent>,
     /// Pending outbound DND requests to be sent.
     pending_outbound_requests: Vec<DoNotDisturbMessage>,
+    /// The number of consecutive DND failures that occurred.
+    failures: u32,
+    /// Connection state tracking.
+    state: State,
+}
+
+impl Default for Handler {
+    fn default() -> Self {
+        Self {
+            pending_events: Vec::new(),
+            pending_outbound_requests: Vec::new(),
+            failures: 0,
+            state: State::Active,
+        }
+    }
 }
 
 impl ConnectionHandler for Handler {
@@ -469,6 +691,24 @@ impl ConnectionHandler for Handler {
             Self::ToBehaviour,
         >,
     > {
+        // Check connection state following ping pattern
+        match self.state {
+            State::Inactive { reported: true } => {
+                return std::task::Poll::Pending; // nothing to do on this connection
+            }
+            State::Inactive { reported: false } => {
+                self.state = State::Inactive { reported: true };
+                return std::task::Poll::Ready(
+                    libp2p::swarm::ConnectionHandlerEvent::NotifyBehaviour(
+                        HandlerOutEvent::RequestFailed {
+                            error: Failure::Unsupported,
+                        },
+                    ),
+                );
+            }
+            State::Active => {}
+        }
+
         // Check for pending outbound requests first
         if let Some(message) = self.pending_outbound_requests.pop() {
             info!(
@@ -562,11 +802,12 @@ impl ConnectionHandler for Handler {
 
                 match response_message {
                     DoNotDisturbMessage::Response { accepted } => {
-                        // Process response to our DND request
+                        // Process response to our DND request - reset failure count on success
                         info!(
                             "Received DND response: accepted={}, notifying behaviour",
                             accepted
                         );
+                        self.failures = 0; // Reset failure count on successful response
                         self.pending_events
                             .push(HandlerOutEvent::ResponseReceived { accepted });
 
@@ -582,19 +823,53 @@ impl ConnectionHandler for Handler {
                 }
             }
             ConnectionEvent::DialUpgradeError(DialUpgradeError { info: _, error }) => {
-                // Handle outbound stream failure
-                let error_msg = format!("Failed to establish outbound DND stream: {error}");
+                // Handle outbound stream failure following ping pattern
+                use libp2p::swarm::StreamUpgradeError;
+
+                let failure = match error {
+                    StreamUpgradeError::NegotiationFailed => {
+                        warn!("DND protocol negotiation failed - peer doesn't support DND");
+                        debug_assert_eq!(self.state, State::Active);
+                        self.state = State::Inactive { reported: false };
+                        // Don't report immediately, let poll() handle it
+                        return;
+                    }
+                    StreamUpgradeError::Timeout => {
+                        warn!("DND protocol negotiation timed out");
+                        Failure::Timeout
+                    }
+                    StreamUpgradeError::Io(e) => {
+                        warn!("DND stream IO error: {}", e);
+                        Failure::network(e)
+                    }
+                    StreamUpgradeError::Apply(e) => {
+                        warn!("DND stream application error: {}", e);
+                        Failure::other(e)
+                    }
+                };
+
                 warn!(
                     "Outbound DND stream establishment failed: {}, notifying behaviour",
-                    error
+                    failure
                 );
-                self.pending_events
-                    .push(HandlerOutEvent::RequestFailed { error: error_msg });
 
-                debug!(
-                    "Queued RequestFailed event, total pending: {}",
-                    self.pending_events.len()
-                );
+                // Increment failure count following ping pattern
+                self.failures += 1;
+
+                // Note: For backward-compatibility the first failure is "free" and silent
+                // to allow graceful handling of various connection scenarios
+                if self.failures > 1 {
+                    self.pending_events
+                        .push(HandlerOutEvent::RequestFailed { error: failure });
+
+                    debug!(
+                        "Queued RequestFailed event (failure #{}), total pending: {}",
+                        self.failures,
+                        self.pending_events.len()
+                    );
+                } else {
+                    debug!("First DND failure ignored for backward compatibility");
+                }
             }
             ConnectionEvent::ListenUpgradeError(ListenUpgradeError { info: _, error }) => {
                 // Handle inbound stream failure
@@ -695,8 +970,31 @@ impl NetworkBehaviour for Behaviour {
         Ok(Handler::default())
     }
 
-    fn on_swarm_event(&mut self, _event: FromSwarm) {
-        // No specific handling needed for swarm events
+    fn on_swarm_event(&mut self, event: FromSwarm) {
+        use libp2p::swarm::behaviour::FromSwarm;
+
+        match event {
+            FromSwarm::ConnectionClosed(connection_closed) => {
+                // Clean up any blocked peer entries when connection is fully closed
+                let peer_id = connection_closed.peer_id;
+
+                // Only clean up if this was the last connection to the peer
+                // (we don't want to unblock a peer just because one connection closed)
+                debug!(
+                    "Connection to peer {peer_id:?} closed, checking if peer should be cleaned up"
+                );
+
+                // Note: We don't automatically unblock peers on connection close
+                // because DND blocking should persist across connection cycles.
+                // Peers are only unblocked when the timer expires or manually unblocked.
+            }
+            FromSwarm::ConnectionEstablished(_) => {
+                // No special handling needed for new connections
+            }
+            _ => {
+                // No specific handling needed for other swarm events
+            }
+        }
     }
 
     fn on_connection_handler_event(
@@ -1664,6 +1962,110 @@ mod tests {
 
         println!("\n🎉 Complete DND stream-based integration test PASSED!");
         println!("   All components working together seamlessly!");
+    }
+
+    #[test]
+    fn test_failure_types() {
+        // Test that all failure types can be created and have proper error messages
+        let timeout_failure = Failure::Timeout;
+        let unsupported_failure = Failure::Unsupported;
+        let serialization_failure = Failure::serialization(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "test serialization error",
+        ));
+        let network_failure = Failure::network(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "test network error",
+        ));
+        let other_failure = Failure::other(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test other error",
+        ));
+
+        // Test Display implementations
+        assert_eq!(timeout_failure.to_string(), "DND request timeout");
+        assert_eq!(
+            unsupported_failure.to_string(),
+            "DND protocol not supported"
+        );
+        assert!(serialization_failure
+            .to_string()
+            .contains("DND serialization error"));
+        assert!(network_failure.to_string().contains("DND network error"));
+        assert!(other_failure.to_string().contains("DND error"));
+
+        // Test Error trait implementations
+        use std::error::Error;
+        assert!(timeout_failure.source().is_none());
+        assert!(unsupported_failure.source().is_none());
+        assert!(serialization_failure.source().is_some());
+        assert!(network_failure.source().is_some());
+        assert!(other_failure.source().is_some());
+    }
+
+    #[test]
+    fn test_memory_bounds_enforcement() {
+        let mut behaviour = Behaviour::default();
+
+        // Add many peers to test memory bounds
+        for i in 0..12000 {
+            let peer_id = PeerId::random();
+            behaviour.block_peer(peer_id, Duration::from_secs(300));
+
+            // Check that we never exceed the maximum
+            assert!(
+                behaviour.blocked_peers.len() <= 10_000,
+                "Blocked peers exceeded maximum at iteration {}",
+                i
+            );
+        }
+
+        // Verify that memory bounds are enforced
+        assert_eq!(behaviour.blocked_peers.len(), 10_000);
+    }
+
+    #[test]
+    fn test_handler_state_management() {
+        let handler = Handler::default();
+
+        // Initially active
+        assert_eq!(handler.state, State::Active);
+        assert_eq!(handler.failures, 0);
+
+        // Test state transitions would need more complex setup with actual swarm
+        // This test verifies the initial state is correct
+    }
+
+    #[test]
+    fn test_connection_cleanup_memory() {
+        let mut behaviour = Behaviour::default();
+        let peer_id = PeerId::random();
+
+        // Block a peer
+        behaviour.block_peer(peer_id, Duration::from_secs(1));
+        assert!(behaviour.is_blocked(&peer_id));
+
+        // Simulate connection close event
+        use libp2p::core::{transport::PortUse, ConnectedPoint};
+        use libp2p::swarm::behaviour::ConnectionClosed;
+        use libp2p::swarm::behaviour::FromSwarm;
+
+        let connection_closed = ConnectionClosed {
+            peer_id,
+            connection_id: ConnectionId::new_unchecked(1),
+            endpoint: &ConnectedPoint::Dialer {
+                address: "/memory/1".parse().unwrap(),
+                role_override: libp2p::core::Endpoint::Dialer,
+                port_use: PortUse::Reuse,
+            },
+            remaining_established: 0,
+            cause: None,
+        };
+
+        behaviour.on_swarm_event(FromSwarm::ConnectionClosed(connection_closed));
+
+        // Peer should still be blocked (DND persists across connections)
+        assert!(behaviour.is_blocked(&peer_id));
     }
 
     /// Test the exact flow: PeerA sends block request to PeerB → PeerB blocks outgoing connections to PeerA for x time
