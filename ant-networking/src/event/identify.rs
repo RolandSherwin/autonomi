@@ -158,19 +158,9 @@ impl SwarmDriver {
                 return;
             }
 
-            // If the peer does not support DoNotDisturb cmd, we dial it back immediately. Else there is a possibility
-            // of this peer getting stuck in our dial queue forever.
-            //
-            // This is a backward compatibility change and can be removed once we are sure that all nodes
-            // support the DoNotDisturb cmd.
-            let dial_back_delay = if does_the_peer_support_dnd(&info) {
-                info!("received identify info from undialed peer {peer_id:?} for not full kbucket {ilog2:?}, dialing back after {DIAL_BACK_DELAY:?}. Addrs: {addrs:?}");
-                DIAL_BACK_DELAY
-            } else {
-                info!("received identify info from undialed peer {peer_id:?} for not full kbucket {ilog2:?}, dialing back immediately because peer does not support DoNotDisturb protocol. Addrs: {addrs:?}");
-                Duration::from_secs(0)
-            };
+            info!("received identify info from undialed peer {peer_id:?} for not full kbucket {ilog2:?}, dialing back after {DIAL_BACK_DELAY:?}. Addrs: {addrs:?}");
 
+            let support_dnd = does_the_peer_support_dnd(&info);
             let mut send_dnd = false;
             match self.dial_queue.entry(peer_id) {
                 hash_map::Entry::Occupied(mut entry) => {
@@ -179,12 +169,16 @@ impl SwarmDriver {
                     *resets += 1;
 
                     if *resets >= 3 {
-                        warn!("Peer {peer_id:?} has been re-added to the dial queue {resets} times. Asking it to DND for a while.");
+                        warn!("Peer {peer_id:?} has been re-added to the dial queue {resets} times. Maybe ask it to DND for a while.");
                         send_dnd = true;
                     }
 
-                    debug!("Resetting dial time for {peer_id:?}");
-                    *time = Instant::now() + dial_back_delay;
+                    if support_dnd {
+                        *time = Instant::now() + DIAL_BACK_DELAY;
+                        debug!("Resetting dial time for {peer_id:?}");
+                    } else {
+                        debug!("Peer {peer_id:?} does not support DoNotDisturb. Not resetting dial time (immediate dial) and not sending DoNotDisturb request.");
+                    }
 
                     for addr in addrs.iter() {
                         if !old_addrs.0.contains(addr) {
@@ -212,16 +206,24 @@ impl SwarmDriver {
                 }
                 hash_map::Entry::Vacant(entry) => {
                     debug!("Adding new addr {addrs:?} to dial queue for {peer_id:?}");
-                    entry.insert((Addresses(addrs), Instant::now() + dial_back_delay, 1));
+                    entry.insert((Addresses(addrs), Instant::now() + DIAL_BACK_DELAY, 1));
                 }
             }
 
             if send_dnd {
-                // request
-                self.swarm
-                    .behaviour_mut()
-                    .do_not_disturb
-                    .send_do_not_disturb_request(peer_id, DIAL_BACK_DELAY.as_secs() + 20);
+                // If the peer does not support DoNotDisturb cmd, we dial it back immediately. Else there is a possibility
+                // of this peer getting stuck in our dial queue forever.
+                //
+                // This is a backward compatibility change and can be removed once we are sure that all nodes
+                // support the DoNotDisturb cmd.
+                if support_dnd {
+                    debug!("Peer {peer_id:?} supports DoNotDisturb. Sending DoNotDisturb request.");
+                    // request
+                    self.swarm
+                        .behaviour_mut()
+                        .do_not_disturb
+                        .send_do_not_disturb_request(peer_id, DIAL_BACK_DELAY.as_secs() + 20);
+                }
             }
         } else {
             // We care only for peers that we dialed and thus are reachable.
