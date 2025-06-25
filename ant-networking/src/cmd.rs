@@ -176,11 +176,6 @@ pub enum LocalSwarmCmd {
     RemovePeer {
         peer: PeerId,
     },
-    /// Do not disturb this peer for a while
-    DoNotDisturb {
-        peer: PeerId,
-        duration: Duration,
-    },
 }
 
 /// Commands to send to the Swarm
@@ -338,9 +333,6 @@ impl Debug for LocalSwarmCmd {
             }
             LocalSwarmCmd::RemovePeer { peer } => {
                 write!(f, "LocalSwarmCmd::RemovePeer({peer:?})")
-            }
-            LocalSwarmCmd::DoNotDisturb { peer, duration } => {
-                write!(f, "LocalSwarmCmd::DoNotDisturb({peer:?}, {duration:?})")
             }
         }
     }
@@ -866,13 +858,6 @@ impl SwarmDriver {
                 if let Some(dead_peer) = self.swarm.behaviour_mut().kademlia.remove_peer(&peer) {
                     self.update_on_peer_removal(*dead_peer.node.key.preimage());
                 }
-            }
-            LocalSwarmCmd::DoNotDisturb { peer, duration } => {
-                cmd_string = "DoNotDisturb";
-                self.swarm
-                    .behaviour_mut()
-                    .do_not_disturb
-                    .block_peer(peer, duration);
             }
         }
 

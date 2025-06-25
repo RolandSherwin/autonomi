@@ -6,11 +6,6 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use std::time::Duration;
-
-use crate::behaviour::do_not_disturb::MAX_DO_NOT_DISTURB_DURATION;
-use crate::cmd::LocalSwarmCmd;
-use crate::send_local_swarm_cmd;
 use crate::{
     cmd::NetworkSwarmCmd, log_markers::Marker, MsgResponder, NetworkError, NetworkEvent,
     SwarmDriver,
@@ -102,39 +97,6 @@ impl SwarmDriver {
                             } else {
                                 error!("Received a bad_peer notification from {detected_by:?}, targeting {bad_peer:?}, which is not us.");
                             }
-                        }
-                        Request::Cmd(ant_protocol::messages::Cmd::DoNotDisturb {
-                            peer,
-                            duration,
-                        }) => {
-                            let response = Response::Cmd(
-                                ant_protocol::messages::CmdResponse::DoNotDisturb(Ok(())),
-                            );
-
-                            self.queue_network_swarm_cmd(NetworkSwarmCmd::SendResponse {
-                                resp: response,
-                                channel: MsgResponder::FromPeer(channel),
-                            });
-
-                            let Some(peer_id) = peer.as_peer_id() else {
-                                warn!("Received DoNotDisturb command from {peer:?} for duration {duration:?}");
-                                return Ok(());
-                            };
-
-                            let duration = if duration > MAX_DO_NOT_DISTURB_DURATION {
-                                warn!("Received DoNotDisturb command from {peer_id:?} for duration {duration:?}, which is not allowed. Setting it to {MAX_DO_NOT_DISTURB_DURATION:?}.");
-                                MAX_DO_NOT_DISTURB_DURATION
-                            } else {
-                                duration
-                            };
-
-                            send_local_swarm_cmd(
-                                self.local_cmd_sender.clone(),
-                                LocalSwarmCmd::DoNotDisturb {
-                                    peer: peer_id,
-                                    duration: Duration::from_secs(duration),
-                                },
-                            );
                         }
                         Request::Query(query) => {
                             self.send_event(NetworkEvent::QueryRequestReceived {

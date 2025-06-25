@@ -6,14 +6,11 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::cmd::NetworkSwarmCmd;
 use crate::relay_manager::{is_a_relayed_peer, RelayManager};
 use crate::{
     craft_valid_multiaddr_without_p2p, multiaddr_strip_p2p, Addresses, NetworkEvent, SwarmDriver,
 };
-use ant_protocol::messages::{Cmd, Request};
 use ant_protocol::version::IDENTIFY_PROTOCOL_STR;
-use ant_protocol::NetworkAddress;
 use itertools::Itertools;
 use libp2p::identify::Info;
 use libp2p::kad::K_VALUE;
@@ -221,16 +218,10 @@ impl SwarmDriver {
 
             if send_dnd {
                 // request
-                let request = Request::Cmd(Cmd::DoNotDisturb {
-                    peer: NetworkAddress::from(self.self_peer_id),
-                    duration: dial_back_delay.as_secs() + 20,
-                });
-                self.queue_network_swarm_cmd(NetworkSwarmCmd::SendRequest {
-                    req: request,
-                    addrs: None,
-                    peer: peer_id,
-                    sender: None,
-                });
+                self.swarm
+                    .behaviour_mut()
+                    .do_not_disturb
+                    .send_do_not_disturb_request(peer_id, DIAL_BACK_DELAY.as_secs() + 20);
             }
         } else {
             // We care only for peers that we dialed and thus are reachable.

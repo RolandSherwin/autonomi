@@ -400,8 +400,8 @@ impl Behaviour {
     /// asking the peer to add us to their do-not-disturb list for the given duration.
     ///
     /// The duration is capped at [`MAX_DO_NOT_DISTURB_DURATION`] seconds.
-    pub fn send_do_not_disturb_request(&mut self, peer: PeerId, duration: Duration) {
-        let duration_secs = duration.as_secs().min(MAX_DO_NOT_DISTURB_DURATION);
+    pub fn send_do_not_disturb_request(&mut self, peer: PeerId, duration_secs: u64) {
+        let duration_secs = duration_secs.min(MAX_DO_NOT_DISTURB_DURATION);
 
         info!("Sending do-not-disturb request to peer {peer:?} for {duration_secs}s");
 
@@ -1096,10 +1096,9 @@ mod tests {
     fn test_send_dnd_request() {
         let mut behaviour = Behaviour::default();
         let peer_id = PeerId::random();
-        let duration = Duration::from_secs(120);
 
         // Send a DND request
-        behaviour.send_do_not_disturb_request(peer_id, duration);
+        behaviour.send_do_not_disturb_request(peer_id, 120);
 
         // Verify that there's a pending event to notify the handler
         assert_eq!(behaviour.pending_events.len(), 1);
@@ -1197,7 +1196,7 @@ mod tests {
         // swarm1 sends DND message to swarm2
         swarm1
             .behaviour_mut()
-            .send_do_not_disturb_request(peer2_id, Duration::from_secs(300));
+            .send_do_not_disturb_request(peer2_id, 300);
         println!("swarm1 sending DND to peer2: {peer2_id:?}");
 
         // Poll swarm1 to process the DND request
@@ -1344,7 +1343,7 @@ mod tests {
         // swarm1 sends DND request to swarm2
         swarm1
             .behaviour_mut()
-            .send_do_not_disturb_request(peer2_id, Duration::from_secs(120));
+            .send_do_not_disturb_request(peer2_id, 120);
 
         // Process events for both swarms to see the full stream exchange
         let mut dnd_response_received = false;
@@ -1499,7 +1498,7 @@ mod tests {
         println!("\n📡 Phase 1: Testing basic DND request/response...");
         swarm1
             .behaviour_mut()
-            .send_do_not_disturb_request(peer2_id, Duration::from_secs(180));
+            .send_do_not_disturb_request(peer2_id, 180);
 
         let mut response_received = false;
         let mut request_received = false;
@@ -1578,7 +1577,7 @@ mod tests {
         println!("\n🔄 Phase 3: Testing multiple DND requests...");
         swarm1
             .behaviour_mut()
-            .send_do_not_disturb_request(peer2_id, Duration::from_secs(60));
+            .send_do_not_disturb_request(peer2_id, 60);
 
         let mut phase3_complete = false;
         let phase3_timeout = timeout(TokioDuration::from_secs(8), async {
@@ -1726,7 +1725,7 @@ mod tests {
         println!("\n📤 Step 1: PeerA sends block request to PeerB (duration: 240s)");
         peer_a
             .behaviour_mut()
-            .send_do_not_disturb_request(peer_b_id, Duration::from_secs(240));
+            .send_do_not_disturb_request(peer_b_id, 240);
 
         // Step 2: Verify PeerB receives the request and blocks PeerA
         let mut request_received = false;

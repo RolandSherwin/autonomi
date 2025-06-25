@@ -49,14 +49,6 @@ pub enum Cmd {
         bad_peer: NetworkAddress,
         bad_behaviour: String,
     },
-    /// Notify the peer to stop sending messages for a while.
-    DoNotDisturb {
-        /// The peer that should not be disturbed.
-        peer: NetworkAddress,
-        /// The duration in seconds for which the peer should not be disturbed.
-        /// This will not be obeyed directly, but rather used to give some control if we require it.
-        duration: u64,
-    },
 }
 
 impl std::fmt::Debug for Cmd {
@@ -88,11 +80,6 @@ impl std::fmt::Debug for Cmd {
                 .field("bad_peer", bad_peer)
                 .field("bad_behaviour", bad_behaviour)
                 .finish(),
-            Cmd::DoNotDisturb { peer, duration } => f
-                .debug_struct("Cmd::DoNotDisturb")
-                .field("peer", peer)
-                .field("duration", duration)
-                .finish(),
         }
     }
 }
@@ -104,7 +91,6 @@ impl Cmd {
             Cmd::Replicate { holder, .. } => holder.clone(),
             Cmd::FreshReplicate { holder, .. } => holder.clone(),
             Cmd::PeerConsideredAsBad { bad_peer, .. } => bad_peer.clone(),
-            Cmd::DoNotDisturb { peer, .. } => peer.clone(),
         }
     }
 }
@@ -136,13 +122,6 @@ impl std::fmt::Display for Cmd {
                 write!(
                     f,
                     "Cmd::PeerConsideredAsBad({detected_by:?} consider peer {bad_peer:?} as bad, due to {bad_behaviour:?})")
-            }
-            Cmd::DoNotDisturb { peer, duration } => {
-                write!(
-                    f,
-                    "Cmd::DoNotDisturb({:?} for {duration} seconds)",
-                    peer.as_peer_id()
-                )
             }
         }
     }
