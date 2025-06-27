@@ -46,7 +46,7 @@ use libp2p::{
 };
 use libp2p::{
     request_response,
-    swarm::{behaviour::toggle::Toggle, NetworkBehaviour, SwarmEvent},
+    swarm::{behaviour::toggle::Toggle, NetworkBehaviour},
 };
 use rand::Rng;
 use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet};
@@ -199,8 +199,6 @@ impl SwarmDriver {
         }
 
         let mut round_robin_index = 0;
-        // temporarily skip processing IncomingConnectionError swarm event to avoid log spamming
-        let mut previous_incoming_connection_error_event = None;
         loop {
             tokio::select! {
                 // polls futures in order they appear here (as opposed to random)
@@ -240,24 +238,6 @@ impl SwarmDriver {
                 },
                 // next take and react to external swarm events
                 swarm_event = self.swarm.select_next_some() => {
-                    // Refer to the handle_swarm_events::IncomingConnectionError for more info on why we skip
-                    // processing the event for one round.
-                    if let Some(previous_event) = previous_incoming_connection_error_event.take() {
-                        if let Err(err) = self.handle_swarm_events(swarm_event) {
-                            warn!("Error while handling swarm event: {err}");
-                        }
-                        if let Err(err) = self.handle_swarm_events(previous_event) {
-                            warn!("Error while handling swarm event: {err}");
-                        }
-                        continue;
-                    }
-                    if matches!(swarm_event, SwarmEvent::IncomingConnectionError {..}) {
-                        previous_incoming_connection_error_event = Some(swarm_event);
-                        continue;
-                    }
-
-                    // logging for handling events happens inside handle_swarm_events
-                    // otherwise we're rewriting match statements etc around this anwyay
                     if let Err(err) = self.handle_swarm_events(swarm_event) {
                         warn!("Error while handling swarm event: {err}");
                     }

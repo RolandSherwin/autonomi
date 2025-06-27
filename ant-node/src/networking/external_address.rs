@@ -47,31 +47,7 @@ pub(crate) struct ExternalAddressManager {
 #[derive(Debug, Default)]
 struct PortStats {
     ok: usize,
-    error: usize,
-}
-
-impl PortStats {
-    fn success_rate(&self) -> f64 {
-        if self.ok + self.error == 0 {
-            0.0
-        } else {
-            self.ok as f64 / (self.ok + self.error) as f64
-        }
-    }
-
-    fn is_faulty(&self) -> bool {
-        // Give the address a chance to prove itself
-        if self.ok + self.error < 10 {
-            return false;
-        }
-
-        // Still give the address a chance to prove itself
-        if self.ok + self.error < 100 {
-            return self.success_rate() < 0.5;
-        }
-
-        self.success_rate() < 0.9
-    }
+    _error: usize,
 }
 
 impl ExternalAddressManager {
@@ -341,56 +317,6 @@ impl ExternalAddressManager {
         });
     }
 
-    pub(in crate::networking) fn on_incoming_connection_error(
-        &mut self,
-        on_address: Multiaddr,
-        swarm: &mut Swarm<NodeBehaviour>,
-    ) {
-        let Some(port) = multiaddr_get_port(&on_address) else {
-            return;
-        };
-
-        let stats = self.connection_stats.entry(port).or_default();
-        stats.error = stats.error.saturating_add(1);
-
-        if stats.is_faulty() {
-            // remove all the addresses with this port
-            let mut removed_confirmed = Vec::new();
-            let mut removed_candidates = Vec::new();
-            let mut to_remove_indices = Vec::new();
-
-            for (idx, state) in &mut self.address_states.iter().enumerate() {
-                if state.is_confirmed() || state.is_candidate() {
-                    let Some(state_port) = multiaddr_get_port(state.multiaddr()) else {
-                        continue;
-                    };
-
-                    if state_port == port {
-                        if state.is_confirmed() {
-                            removed_confirmed.push(state.multiaddr().clone());
-                        } else {
-                            removed_candidates.push(state.multiaddr().clone());
-                        }
-                        to_remove_indices.push(idx);
-                    }
-                }
-            }
-            for idx in to_remove_indices.iter().rev() {
-                swarm.remove_external_address(self.address_states[*idx].multiaddr());
-                let _ = self.address_states.remove(*idx);
-            }
-            if !removed_candidates.is_empty() {
-                debug!("Removed external candidates due to connection errors on port {port}: {removed_candidates:?}");
-            }
-            if !removed_confirmed.is_empty() {
-                info!("Removed external addresses due to connection errors on port {port}: {removed_confirmed:?}");
-            }
-            if !removed_candidates.is_empty() || !removed_confirmed.is_empty() {
-                Self::print_swarm_state(swarm);
-            }
-        }
-    }
-
     /// Reset the incoming connection errors for a port
     pub(in crate::networking) fn on_established_incoming_connection(
         &mut self,
@@ -567,9 +493,5 @@ impl ExternalAddressState {
 
     fn is_candidate(&self) -> bool {
         matches!(self, Self::Candidate { .. })
-    }
-
-    fn is_confirmed(&self) -> bool {
-        matches!(self, Self::Confirmed { .. })
     }
 }
