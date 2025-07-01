@@ -16,6 +16,7 @@ use ant_protocol::{NetworkAddress, PrettyPrintKBucketKey, PrettyPrintRecordKey};
 use futures::future::select_all;
 use libp2p::autonat::OutboundFailure;
 use libp2p::kad::{KBucketDistance, Record, RecordKey, K_VALUE};
+use libp2p::swarm::ConnectionId;
 use libp2p::{identity::Keypair, Multiaddr, PeerId};
 use tokio::sync::{mpsc, oneshot};
 
@@ -541,4 +542,15 @@ pub(crate) fn send_local_swarm_cmd(
             error!("Failed to send SwarmCmd: {}", error);
         }
     });
+}
+
+// A standard way to log connection id & the action performed on it.
+pub(crate) fn connection_action_logging(
+    remote_peer_id: &PeerId,
+    self_peer_id: &PeerId,
+    connection_id: &ConnectionId,
+    action_string: &str,
+) {
+    // ELK logging. Do not update without proper testing.
+    info!("Action: {action_string}, performed on: {connection_id:?}, remote_peer_id: {remote_peer_id:?}, self_peer_id: {self_peer_id:?}");
 }

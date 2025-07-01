@@ -160,6 +160,7 @@ impl SwarmDriver {
 
         let distance =
             NetworkAddress::from(self.self_peer_id).distance(&NetworkAddress::from(added_peer));
+        // ELK logging. Do not update without proper testing.
         info!("Node {:?} added new peer into routing table: {added_peer:?}. It has a {:?} distance to us.",
         self.self_peer_id, distance.ilog2());
 
@@ -196,6 +197,7 @@ impl SwarmDriver {
 
         let distance =
             NetworkAddress::from(self.self_peer_id).distance(&NetworkAddress::from(removed_peer));
+        // ELK logging. Do not update without proper testing.
         info!(
             "Peer removed from routing table: {removed_peer:?}. We now have #{} connected peers. It has a {:?} distance to us.",
             self.peers_in_rt, distance.ilog2()

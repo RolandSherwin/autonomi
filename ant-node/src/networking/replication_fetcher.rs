@@ -464,7 +464,7 @@ impl ReplicationFetcher {
         if let Some(ref distance_range) = self.distance_range {
             new_incoming_keys.retain(|(addr, _record_type)| {
                 let distance = &self_address.distance(addr);
-                debug!(
+                trace!(
                     "Distance to target {addr:?} is {distance:?}, against range {distance_range:?}"
                 );
                 let mut is_in_range = distance <= distance_range;

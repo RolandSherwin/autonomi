@@ -8,6 +8,7 @@
 
 use crate::networking::{
     multiaddr_get_port,
+    network::connection_action_logging,
     relay_manager::{is_a_relayed_peer, RelayManager},
     Addresses, NetworkEvent,
 };
@@ -36,13 +37,49 @@ impl SwarmDriver {
                 connection_id,
             } => {
                 let start = Instant::now();
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer_id,
+                    &self.self_peer_id,
+                    &connection_id,
+                    "Identify Received",
+                );
+
                 self.handle_identify_received(peer_id, info, connection_id);
                 trace!("SwarmEvent handled in {:?}: identify", start.elapsed());
             }
             // Log the other Identify events.
-            libp2p::identify::Event::Sent { .. } => debug!("identify: {identify_event:?}"),
-            libp2p::identify::Event::Pushed { .. } => debug!("identify: {identify_event:?}"),
-            libp2p::identify::Event::Error { .. } => warn!("identify: {identify_event:?}"),
+            libp2p::identify::Event::Sent { peer_id, .. } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer_id,
+                    &self.self_peer_id,
+                    &identify_event.connection_id(),
+                    "Identify Sent",
+                );
+                debug!("identify: {identify_event:?}")
+            }
+            libp2p::identify::Event::Pushed { peer_id, .. } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer_id,
+                    &self.self_peer_id,
+                    &identify_event.connection_id(),
+                    "Identify Pushed",
+                );
+
+                debug!("identify: {identify_event:?}")
+            }
+            libp2p::identify::Event::Error { peer_id, .. } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer_id,
+                    &self.self_peer_id,
+                    &identify_event.connection_id(),
+                    "Identify Error",
+                );
+                warn!("identify: {identify_event:?}")
+            }
         }
     }
 

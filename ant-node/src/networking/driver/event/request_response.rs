@@ -9,8 +9,8 @@
 use super::SwarmDriver;
 use crate::networking::driver::event::MsgResponder;
 use crate::networking::interface::NetworkSwarmCmd;
+use crate::networking::network::connection_action_logging;
 use crate::networking::{log_markers::Marker, NetworkError, NetworkEvent};
-
 use ant_protocol::messages::ConnectionInfo;
 use ant_protocol::{
     messages::{CmdResponse, Request, Response},
@@ -37,6 +37,14 @@ impl SwarmDriver {
                     request_id,
                     ..
                 } => {
+                    // ELK logging. Do not update without proper testing.
+                    connection_action_logging(
+                        &peer,
+                        &self.self_peer_id,
+                        &connection_id,
+                        &request.to_string(),
+                    );
+
                     debug!("Received request {request_id:?} from peer {peer:?}, req: {request:?}");
                     // If the request is replication or quote verification,
                     // we can handle it and send the OK response here.
@@ -111,6 +119,14 @@ impl SwarmDriver {
                     request_id,
                     response,
                 } => {
+                    // ELK logging. Do not update without proper testing.
+                    connection_action_logging(
+                        &peer,
+                        &self.self_peer_id,
+                        &connection_id,
+                        &response.to_string(),
+                    );
+
                     debug!("Got response {request_id:?} from peer {peer:?}, res: {response}.");
                     if let Some(sender) = self.pending_requests.remove(&request_id) {
                         // Get the optional connection info.
@@ -154,8 +170,15 @@ impl SwarmDriver {
                 request_id,
                 error,
                 peer,
-                ..
+                connection_id,
             } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer,
+                    &self.self_peer_id,
+                    &connection_id,
+                    "OutboundFailure",
+                );
                 if let Some(sender) = self.pending_requests.remove(&request_id) {
                     match sender {
                         Some(sender) => {
@@ -177,13 +200,29 @@ impl SwarmDriver {
                 peer,
                 request_id,
                 error,
-                ..
+                connection_id,
             } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer,
+                    &self.self_peer_id,
+                    &connection_id,
+                    "InboundFailure",
+                );
                 warn!("RequestResponse: InboundFailure for request_id: {request_id:?} and peer: {peer:?}, with error: {error:?}");
             }
             request_response::Event::ResponseSent {
-                peer, request_id, ..
+                peer,
+                request_id,
+                connection_id,
             } => {
+                // ELK logging. Do not update without proper testing.
+                connection_action_logging(
+                    &peer,
+                    &self.self_peer_id,
+                    &connection_id,
+                    "ResponseSent",
+                );
                 debug!("ResponseSent for request_id: {request_id:?} and peer: {peer:?}");
             }
         }

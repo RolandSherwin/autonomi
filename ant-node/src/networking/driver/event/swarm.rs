@@ -315,6 +315,7 @@ impl SwarmDriver {
                 debug!("OutgoingConnectionError on {connection_id:?} - {error:?}");
 
                 let remote_peer = "";
+                // ELK logging. Do not update without proper testing.
                 for (error_str, level) in dial_error_to_str(&error) {
                     match level {
                         tracing::Level::ERROR => error!(
@@ -344,6 +345,7 @@ impl SwarmDriver {
                 event_string = "OutgoingConnErr";
                 debug!("OutgoingConnectionError to {failed_peer_id:?} on {connection_id:?} - {error:?}");
 
+                // ELK logging. Do not update without proper testing.
                 for (error_str, level) in dial_error_to_str(&error) {
                     match level {
                         tracing::Level::ERROR => error!(
@@ -492,6 +494,8 @@ impl SwarmDriver {
                     None => String::new(),
                 };
                 debug!("IncomingConnectionError from local_addr {local_addr:?}, send_back_addr {send_back_addr:?} on {connection_id:?} with error {error:?}");
+
+                // ELK logging. Do not update without proper testing.
                 let (error_str, level) = listen_error_to_str(&error);
                 match level {
                         tracing::Level::ERROR => error!(
