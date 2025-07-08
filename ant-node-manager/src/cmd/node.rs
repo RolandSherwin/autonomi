@@ -751,5 +751,4 @@ async fn get_batch_manager_from_service_data(
         node_registry,
         verbosity,
     )
-    .await
 }
