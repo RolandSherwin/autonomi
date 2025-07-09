@@ -24,8 +24,8 @@ async fn test_transport_protocol_variants() -> Result<()> {
         ("/ip4/127.0.0.1/tcp/8080/ws/p2p/12D3KooWRBhwfeP2Y4TCx1SM6s9rUoHhR5STiGwxBhgFRcw3UERE", true),
         // TCP format (valid)
         ("/ip4/127.0.0.1/tcp/8080/p2p/12D3KooWRBhwfeP2Y4TCx1SM6s9rUoHhR5STiGwxBhgFRcw3UERE", true),
-        // Missing peer ID (invalid)
-        ("/ip4/127.0.0.1/tcp/8080", false),
+        // Missing peer ID (valid)
+        ("/ip4/127.0.0.1/tcp/8080", true),
         // No transport protocol (invalid)
         ("/ip4/127.0.0.1/p2p/12D3KooWRBhwfeP2Y4TCx1SM6s9rUoHhR5STiGwxBhgFRcw3UERE", false),
         // Invalid protocol chain (invalid)
@@ -67,42 +67,6 @@ async fn test_craft_valid_multiaddr_from_str() -> Result<()> {
     let invalid_addr = "not a multiaddr";
     let result = craft_valid_multiaddr_from_str(invalid_addr);
     assert!(result.is_none(), "Should reject invalid multiaddr string");
-
-    // Test with malformed but parseable multiaddr
-    let malformed_addr = "/ip4/127.0.0.1/tcp/8080"; // Missing peer ID
-    let result = craft_valid_multiaddr_from_str(malformed_addr);
-    assert!(result.is_none(), "Should reject malformed multiaddr");
-
-    // Same address with ignore_peer_id=true should succeed
-    let result = craft_valid_multiaddr_from_str(malformed_addr);
-    assert!(
-        result.is_some(),
-        "Should accept multiaddr without peer ID when ignoring peer ID"
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_craft_valid_multiaddr_ignore_peer_id() -> Result<()> {
-    let _guard = LogBuilder::init_single_threaded_tokio_test();
-
-    // Test addr without peer ID
-    let addr_without_peer: Multiaddr = "/ip4/127.0.0.1/udp/8080/quic-v1".parse()?;
-
-    // Should fail with ignore_peer_id = false
-    let result1 = craft_valid_multiaddr(&addr_without_peer);
-    assert!(
-        result1.is_none(),
-        "Should reject addr without peer ID by default"
-    );
-
-    // Should pass with ignore_peer_id = true
-    let result2 = craft_valid_multiaddr(&addr_without_peer);
-    assert!(
-        result2.is_some(),
-        "Should accept addr without peer ID when ignore flag is set"
-    );
 
     Ok(())
 }
