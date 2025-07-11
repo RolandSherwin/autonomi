@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 pub struct BatchServiceManager<T: ServiceStateActions + Send> {
     /// The list of services to manage.
     services: Vec<T>,
-    service_control: Box<dyn ServiceControl>,
+    service_control: Box<dyn ServiceControl + Send>,
     node_registry: NodeRegistryManager,
     verbosity: VerbosityLevel,
 }
@@ -33,7 +33,7 @@ pub struct BatchServiceManager<T: ServiceStateActions + Send> {
 impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
     pub async fn new(
         services: Vec<T>,
-        service_control: Box<dyn ServiceControl>,
+        service_control: Box<dyn ServiceControl + Send>,
         node_registry: NodeRegistryManager,
         verbosity: VerbosityLevel,
     ) -> Self {
@@ -607,6 +607,26 @@ impl BatchResult {
                 Some(&errors[errors.len() - 1])
             }
         })
+    }
+
+    pub fn into_eyre(self) -> color_eyre::eyre::Result<()> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            let errors: Vec<String> = self
+                .errors
+                .iter()
+                .flat_map(|(service_name, errors)| {
+                    errors
+                        .iter()
+                        .map(move |error| format!("{service_name}: {error}"))
+                })
+                .collect();
+            Err(eyre!(
+                "Batch operation failed with errors: {}",
+                errors.join(", ")
+            ))
+        }
     }
 }
 
