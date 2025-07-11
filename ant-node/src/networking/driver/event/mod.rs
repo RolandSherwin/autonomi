@@ -8,6 +8,7 @@
 
 mod identify;
 mod kad;
+mod listen_addr_writer;
 mod request_response;
 mod swarm;
 

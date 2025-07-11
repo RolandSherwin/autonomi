@@ -13,6 +13,7 @@ mod relay_client;
 pub(super) mod service;
 mod upnp;
 
+pub(crate) use metadata::MetadataExtendedRecorder;
 pub(crate) use metadata::MetadataRecorder;
 pub(crate) use reachability_check::ReachabilityStatusMetric;
 

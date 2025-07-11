@@ -573,7 +573,7 @@ impl Node {
             NetworkEvent::PeerWithUnsupportedProtocol { .. } => {
                 event_header = "PeerWithUnsupportedProtocol";
             }
-            NetworkEvent::NewListenAddr(_) => {
+            NetworkEvent::NewListenAddr(addr) => {
                 event_header = "NewListenAddr";
             }
             NetworkEvent::ResponseReceived { res } => {

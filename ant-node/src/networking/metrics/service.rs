@@ -24,6 +24,7 @@ pub(crate) struct MetricsRegistries {
     pub standard_metrics: Registry,
     pub extended_metrics: Registry,
     pub metadata: Registry,
+    pub metadata_extended: Registry,
 }
 
 const METRICS_CONTENT_TYPE: &str = "application/openmetrics-text;charset=utf-8;version=1.0.0";
@@ -67,7 +68,7 @@ pub(crate) fn run_metrics_server(registries: MetricsRegistries, port: u16) -> wa
         info!("Metrics server on http://{}/metrics", server.local_addr());
         println!("Metrics server on http://{}/metrics", server.local_addr());
 
-        info!("Metrics server on http://{} Available endpoints: /metrics, /metrics_extended, /metadata", server.local_addr());
+        info!("Metrics server on http://{} Available endpoints: /metrics, /metrics_extended, /metadata, /metadata_extended", server.local_addr());
 
         // run the server with graceful shutdown
         let graceful = server.with_graceful_shutdown(async {
@@ -92,6 +93,7 @@ pub(crate) struct MetricService {
     standard_registry: SharedRegistry,
     extended_registry: SharedRegistry,
     metadata: SharedRegistry,
+    metadata_extended: SharedRegistry,
 }
 
 impl MetricService {
@@ -105,6 +107,10 @@ impl MetricService {
 
     fn get_metadata_registry(&mut self) -> SharedRegistry {
         Arc::clone(&self.metadata)
+    }
+
+    fn get_metadata_extended_registry(&mut self) -> SharedRegistry {
+        Arc::clone(&self.metadata_extended)
     }
 
     fn respond_with_metrics(&mut self) -> Result<Response<String>> {
@@ -194,6 +200,28 @@ impl MetricService {
         Ok(response)
     }
 
+    fn respond_with_metadata_extended(&mut self) -> Result<Response<String>> {
+        let mut response: Response<String> = Response::default();
+
+        let _ = response.headers_mut().insert(
+            hyper::header::CONTENT_TYPE,
+            METRICS_CONTENT_TYPE
+                .try_into()
+                .map_err(|_| NetworkError::NetworkMetricError)?,
+        );
+
+        let reg = self.get_metadata_extended_registry();
+        let reg = reg.lock().map_err(|_| NetworkError::NetworkMetricError)?;
+        encode(&mut response.body_mut(), &reg).map_err(|err| {
+            error!("Failed to encode the metadata Registry {err:?}");
+            NetworkError::NetworkMetricError
+        })?;
+
+        *response.status_mut() = StatusCode::OK;
+
+        Ok(response)
+    }
+
     fn respond_with_404_not_found(&mut self) -> Response<String> {
         let mut resp = Response::default();
         *resp.status_mut() = StatusCode::NOT_FOUND;
@@ -238,6 +266,11 @@ impl Service<Request<Body>> for MetricService {
                 Ok(resp) => resp,
                 Err(_) => self.respond_with_500_server_error(),
             }
+        } else if req_method == Method::GET && req_path == "/metadata_extended" {
+            match self.respond_with_metadata_extended() {
+                Ok(resp) => resp,
+                Err(_) => self.respond_with_500_server_error(),
+            }
         } else {
             self.respond_with_404_not_found()
         };
@@ -249,6 +282,7 @@ pub(crate) struct MakeMetricService {
     standard_registry: SharedRegistry,
     extended_registry: SharedRegistry,
     metadata: SharedRegistry,
+    metadata_extended: SharedRegistry,
 }
 
 impl MakeMetricService {
@@ -257,6 +291,7 @@ impl MakeMetricService {
             standard_registry: Arc::new(Mutex::new(registries.standard_metrics)),
             extended_registry: Arc::new(Mutex::new(registries.extended_metrics)),
             metadata: Arc::new(Mutex::new(registries.metadata)),
+            metadata_extended: Arc::new(Mutex::new(registries.metadata_extended)),
         }
     }
 }
@@ -274,12 +309,14 @@ impl<T> Service<T> for MakeMetricService {
         let standard_registry = Arc::clone(&self.standard_registry);
         let extended_registry = Arc::clone(&self.extended_registry);
         let metadata = Arc::clone(&self.metadata);
+        let metadata_extended = Arc::clone(&self.metadata_extended);
 
         let fut = async move {
             Ok(MetricService {
                 standard_registry,
                 extended_registry,
                 metadata,
+                metadata_extended,
             })
         };
         Box::pin(fut)

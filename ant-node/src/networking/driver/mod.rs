@@ -11,7 +11,7 @@ pub(crate) mod cmd;
 pub(crate) mod event;
 pub(crate) mod network_discovery;
 
-use event::NodeEvent;
+use event::{listen_addr_writer::ListenAddrWriter, NodeEvent};
 use network_discovery::{NetworkDiscovery, NETWORK_DISCOVER_INTERVAL};
 
 #[cfg(feature = "open-metrics")]
@@ -160,6 +160,8 @@ pub(crate) struct SwarmDriver {
     pub(crate) last_connection_pruning_time: Instant,
     /// record versions of those peers that in the non-full-kbuckets.
     pub(crate) peers_version: HashMap<PeerId, String>,
+    /// Writer for tracking listener addresses
+    pub(crate) listen_addr_writer: Option<ListenAddrWriter>,
 }
 
 impl SwarmDriver {
