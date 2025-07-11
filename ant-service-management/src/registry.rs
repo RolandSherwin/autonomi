@@ -156,7 +156,9 @@ impl NodeRegistryManager {
 
                                 if path_canonical == save_path_canonical {
                                     debug!("Registry file change detected for: {path:?}");
-                                    let _ = event_tx.send(event.clone());
+                                    if let Err(err) = event_tx.send(event.clone()) {
+                                        error!("Failed to send registry file change event to internal rx: {err}");
+                                    }
                                     break;
                                 }
                             }
@@ -185,7 +187,11 @@ impl NodeRegistryManager {
                 match manager.reload().await {
                     Ok(()) => {
                         info!("Registry reloaded successfully from file change");
-                        let _ = tx.send(());
+                        if let Err(er) = tx.send(()) {
+                            error!("Failed to send registry reload notification: {er}");
+                        } else {
+                            debug!("Registry reload notification sent");
+                        }
                     }
                     Err(e) => {
                         error!("Failed to reload registry after file change: {e:?}");
@@ -205,6 +211,7 @@ impl NodeRegistryManager {
             new_manager.environment_variables.read().await.clone();
         *self.nat_status.write().await = new_manager.nat_status.read().await.clone();
         *self.nodes.write().await = new_manager.nodes.read().await.clone();
+
         Ok(())
     }
 }
