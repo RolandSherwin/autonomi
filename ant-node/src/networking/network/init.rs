@@ -17,7 +17,7 @@ use crate::{
     networking::{
         bootstrap::{InitialBootstrap, InitialBootstrapTrigger},
         circular_vec::CircularVec,
-        driver::{network_discovery::NetworkDiscovery, NodeBehaviour, SwarmDriver},
+        driver::{event::listen_addr_writer::ListenAddrWriter, network_discovery::NetworkDiscovery, NodeBehaviour, SwarmDriver},
         error::{NetworkError, Result},
         reachability_check::{ReachabilityCheckBehaviour, ReachabilityCheckSwarmDriver},
         record_store::{NodeRecordStore, NodeRecordStoreConfig},
@@ -416,6 +416,7 @@ fn init_swarm_driver(
     };
 
     let is_upnp_enabled = swarm.behaviour().upnp.is_enabled();
+    let listen_addr_writer = Some(ListenAddrWriter::new(&config.root_dir));
     let swarm_driver = SwarmDriver {
         swarm,
         self_peer_id: peer_id,
@@ -457,6 +458,7 @@ fn init_swarm_driver(
         last_connection_pruning_time: Instant::now(),
         peers_version: Default::default(),
         dial_queue: Default::default(),
+        listen_addr_writer,
     };
 
     (network_event_receiver, swarm_driver, metrics_shutdown_tx)

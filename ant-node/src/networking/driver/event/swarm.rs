@@ -171,6 +171,11 @@ impl SwarmDriver {
                     address.push(Protocol::P2p(local_peer_id));
                 }
 
+                // Update the listen address writer
+                if let Some(writer) = self.listen_addr_writer.as_mut() {
+                    writer.add_listener(listener_id, address.clone());
+                }
+
                 if !self.is_relay_client {
                     if self.local {
                         // all addresses are effectively external here...
@@ -221,6 +226,12 @@ impl SwarmDriver {
             } => {
                 event_string = "listener closed";
                 info!("Listener {listener_id:?} with add {addresses:?} has been closed for {reason:?}");
+                
+                // Update the listen address writer
+                if let Some(writer) = self.listen_addr_writer.as_mut() {
+                    writer.remove_listener(&listener_id);
+                }
+                
                 if let Some(relay_manager) = self.relay_manager.as_mut() {
                     relay_manager.on_listener_closed(&listener_id, &mut self.swarm);
                 }
@@ -524,10 +535,18 @@ impl SwarmDriver {
             } => {
                 event_string = "ExpiredListenAddr";
                 info!("Listen address has expired. {listener_id:?} on {address:?}");
+                
+                // Update the listen address writer
+                if let Some(writer) = self.listen_addr_writer.as_mut() {
+                    writer.remove_address(&address);
+                }
             }
             SwarmEvent::ListenerError { listener_id, error } => {
                 event_string = "ListenerError";
                 warn!("ListenerError {listener_id:?} with non-fatal error {error:?}");
+                
+                // For critical errors, we might want to remove the listener
+                // but since this is described as "non-fatal", we'll keep it
             }
             other => {
                 event_string = "Other";
