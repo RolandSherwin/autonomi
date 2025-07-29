@@ -43,7 +43,6 @@ impl PyAntNode {
         initial_peers = vec![],
         local = false,
         root_dir = None,
-        relay = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn init<'p>(
@@ -55,7 +54,6 @@ impl PyAntNode {
         initial_peers: Vec<String>,
         local: bool,
         root_dir: Option<String>,
-        relay: bool,
     ) -> PyResult<Bound<'p, PyAny>> {
         let rewards_address = RewardsAddress::from_hex(&rewards_address)
             .map_err(|e| PyValueError::new_err(format!("Invalid rewards address: {e}")))?;
@@ -86,7 +84,6 @@ impl PyAntNode {
             );
             node_builder.local(local);
             node_builder.no_upnp(false);
-            node_builder.relay_client(relay);
 
             let running_node = node_builder
                 .build_and_run()
