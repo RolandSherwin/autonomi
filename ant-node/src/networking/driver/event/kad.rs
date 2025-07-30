@@ -191,6 +191,10 @@ impl SwarmDriver {
                 event_string = "kad_event::RoutablePeer";
                 debug!(peer_id = %peer, "kad::Event: RoutablePeer");
             }
+            kad::Event::ModeChanged { new_mode } => {
+                event_string = "kad_event::ModeChanged";
+                info!("Mode changed: {new_mode:?}");
+            }
             other => {
                 event_string = "kad_event::Other";
                 debug!("kad::Event ignored: {other:?}");
