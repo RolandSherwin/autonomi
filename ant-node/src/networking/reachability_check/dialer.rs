@@ -16,6 +16,7 @@ use libp2p::swarm::ConnectionId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
+use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::time::Instant;
@@ -65,7 +66,7 @@ pub(crate) enum DialResult {
     SuccessfulDialBack,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 /// The state of a dial attempt that we initiated with a remote peer.
 ///
 /// The state can only be transitioned to Connected or DialBackReceived.
@@ -77,6 +78,28 @@ pub(super) enum DialState {
     Connected { at: Instant },
     /// We have received a response from the remote peer after the DIAL_BACK_DELAY.
     DialBackReceived { at: Instant },
+}
+
+impl fmt::Debug for DialState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DialState::Initiated { at } => write!(
+                f,
+                "DialState::Initiated at {at:?} elapsed {:?}",
+                at.elapsed()
+            ),
+            DialState::Connected { at } => write!(
+                f,
+                "DialState::Connected at {at:?} elapsed {:?}",
+                at.elapsed()
+            ),
+            DialState::DialBackReceived { at } => write!(
+                f,
+                "DialState::DialBackReceived at {at:?} elapsed {:?}",
+                at.elapsed()
+            ),
+        }
+    }
 }
 
 impl DialState {
