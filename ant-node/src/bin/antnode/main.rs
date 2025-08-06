@@ -407,16 +407,6 @@ async fn run_node(
         info!("Running reachability check ... This might take a few minutes to complete.");
         let status = node_builder.run_reachability_check().await;
         match status {
-            Ok(ReachabilityStatus::Relay { upnp }) => {
-                info!(
-                    "Reachability check: Relay. Starting node with relay flag and UPnP: {upnp:?}"
-                );
-                println!(
-                    "Reachability check: Relay. Starting node with relay flag and UPnP: {upnp:?}"
-                );
-                node_builder.relay_client(true);
-                node_builder.no_upnp(!upnp);
-            }
             Ok(ReachabilityStatus::Reachable { addr, upnp }) => {
                 info!(
                     "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}",
@@ -431,13 +421,13 @@ async fn run_node(
             }
             Ok(ReachabilityStatus::NotRoutable { .. }) => {
                 info!(
-                    "Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node."
+                    "Reachability check: NotRoutable. Terminating node as we are not externally reachable."
                 );
                 println!(
-                    "Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node."
+                    "Reachability check: NotRoutable. Terminating node as we are not externally reachable."
                 );
                 return Err(eyre!(
-                    "The node will be unreachable even with Relay mode. Terminating node."
+                    "Terminating node as we are not externally reachable."
                 ));
             }
             Err(err) => {
