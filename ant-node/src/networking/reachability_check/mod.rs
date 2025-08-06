@@ -12,7 +12,6 @@ mod listener;
 use crate::error::Result;
 use crate::networking::NetworkError;
 use crate::networking::error::ReachabilityCheckError;
-use crate::networking::multiaddr_get_ip;
 use crate::networking::multiaddr_get_socket_addr;
 use crate::networking::multiaddr_pop_p2p;
 use crate::networking::network::endpoint_str;
@@ -125,7 +124,6 @@ pub(crate) struct ReachabilityCheckSwarmDriver {
     pub(crate) swarm: Swarm<ReachabilityCheckBehaviour>,
     pub(crate) upnp_supported: bool,
     pub(crate) dial_manager: DialManager,
-    pub(crate) listeners: HashMap<ListenerId, HashSet<IpAddr>>,
     #[cfg(feature = "open-metrics")]
     pub(crate) metrics_recorder: Option<NetworkMetricsRecorder>,
 }
@@ -181,7 +179,6 @@ impl ReachabilityCheckSwarmDriver {
             swarm,
             dial_manager: DialManager::new(initial_contacts),
             upnp_supported: false,
-            listeners,
             #[cfg(feature = "open-metrics")]
             metrics_recorder,
         })
@@ -234,18 +231,6 @@ impl ReachabilityCheckSwarmDriver {
                 listener_id,
             } => {
                 event_string = "new listen addr";
-
-                let ip_addr = multiaddr_get_ip(&address);
-                if let Some(ip_addr) = ip_addr {
-                    let _ = self
-                        .listeners
-                        .entry(listener_id)
-                        .or_default()
-                        .insert(ip_addr);
-                    debug!("Added new listen ip address {ip_addr:?} to listener {listener_id:?}");
-                } else {
-                    warn!("Unable to get socket address from: {address:?}");
-                }
 
                 let local_peer_id = *self.swarm.local_peer_id();
                 if address.iter().last() != Some(Protocol::P2p(local_peer_id)) {
@@ -656,10 +641,6 @@ impl ReachabilityCheckSwarmDriver {
         let mut external_to_local_addr_map: HashMap<SocketAddr, HashSet<SocketAddr>> =
             HashMap::new();
         for (reachable_addr, connection_ids) in reachable_connection_ids {
-            let IpAddr::V4(reachable_addr_ip) = reachable_addr.ip() else {
-                warn!("Reachable address {reachable_addr:?} is not an IPv4 address. Skipping.");
-                continue;
-            };
             for connection_id in connection_ids {
                 let Some(local_adapter_addr) = self
                     .dial_manager
@@ -687,83 +668,9 @@ impl ReachabilityCheckSwarmDriver {
                     || local_adapter_ip.is_documentation()
                     || local_adapter_ip.is_broadcast()
                 {
-                    info!(
-                        "Local adapter address {local_adapter_ip:?} is unspecified. Fetching another local adapter address from the listener."
+                    warn!(
+                        "Local adapter address {local_adapter_ip:?} is unspecified, documentation or broadcast. Skipping."
                     );
-                    for (listener_id, listener_ip_addrs) in self.listeners.iter() {
-                        if listener_ip_addrs
-                            .iter()
-                            .any(|addr| addr == &IpAddr::V4(local_adapter_ip))
-                        {
-                            info!(
-                                "Listener {listener_id:?} has local adapter address {local_adapter_ip:?} in it's list {listener_ip_addrs:?}. Now fetching another local address insetad of {local_adapter_ip:?} from this list."
-                            );
-                            // 1. try to first find the listener == reachable_addr
-                            if let Some(another_listener_ip) = listener_ip_addrs
-                                .iter()
-                                .find(|&addr| addr == &reachable_addr_ip)
-                            {
-                                info!(
-                                    "Found another local address {another_listener_ip:?} from the listener {listener_id:?} that is the same as the reachable address {reachable_addr_ip:?}. Using it instead of {local_adapter_ip:?}"
-                                );
-                                let _ = external_to_local_addr_map
-                                    .entry(reachable_addr)
-                                    .or_default()
-                                    .insert(SocketAddr::new(
-                                        *another_listener_ip,
-                                        local_adapter_addr.port(),
-                                    ));
-                            }
-
-                            // 2. prioritize private network ranges ( include 10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12).
-                            if let Some(another_listener_ip) =
-                                listener_ip_addrs.iter().find(|&addr| {
-                                    let IpAddr::V4(addr) = addr else { return false };
-                                    matches!(addr.octets(), [10, ..])
-                                        || matches!(addr.octets(), [192, 168, ..])
-                                        || matches!(addr.octets(), [172, 16, ..])
-                                })
-                            {
-                                info!(
-                                    "Found another local address {another_listener_ip:?} from the listener {listener_id:?} that is in the private network range. (10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12)"
-                                );
-                                let _ = external_to_local_addr_map
-                                    .entry(reachable_addr)
-                                    .or_default()
-                                    .insert(SocketAddr::new(
-                                        *another_listener_ip,
-                                        local_adapter_addr.port(),
-                                    ));
-                            }
-
-                            // 3. else find anything that is not unspecified (local_adapter_ip)
-                            if let Some(another_listener_ip) = listener_ip_addrs
-                                .iter()
-                                .find(|&addr| addr != &IpAddr::V4(local_adapter_ip))
-                            {
-                                info!(
-                                    "Found another local address {another_listener_ip:?} from the listener {listener_id:?} that is not unspecified)"
-                                );
-                                let _ = external_to_local_addr_map
-                                    .entry(reachable_addr)
-                                    .or_default()
-                                    .insert(SocketAddr::new(
-                                        *another_listener_ip,
-                                        local_adapter_addr.port(),
-                                    ));
-                            } else {
-                                warn!(
-                                    "No other local adapter address found in the listener {listener_id:?} that is not unspecified."
-                                );
-                            }
-
-                            break;
-                        } else {
-                            debug!(
-                                "Listener {listener_id:?} does not have local adapter address {local_adapter_ip:?} in it's list {listener_ip_addrs:?}"
-                            );
-                        }
-                    }
                 } else {
                     info!(
                         "Local adapter address {local_adapter_ip:?} is valid. Adding it to the external to local address map."
