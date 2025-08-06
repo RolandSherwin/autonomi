@@ -563,6 +563,10 @@ impl ReachabilityCheckSwarmDriver {
                     "Retrying reachability check workflow. Current workflow attempt: {} of {MAX_WORKFLOW_ATTEMPTS}",
                     self.dial_manager.current_workflow_attempt + 1
                 );
+                println!(
+                    "Retrying reachability check workflow. Current workflow attempt: {} of {MAX_WORKFLOW_ATTEMPTS}",
+                    self.dial_manager.current_workflow_attempt + 1
+                );
                 self.dial_manager.reattempt_workflow();
                 self.trigger_dial()?;
                 return Ok(None);
