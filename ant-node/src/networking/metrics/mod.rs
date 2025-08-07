@@ -22,6 +22,7 @@ use bad_node::TimeFrame;
 use libp2p::PeerId;
 use libp2p::metrics::Metrics as Libp2pMetrics;
 use libp2p::metrics::Recorder;
+pub(crate) use metadata::MetadataExtendedRecorder;
 pub(crate) use metadata::MetadataRecorder;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
