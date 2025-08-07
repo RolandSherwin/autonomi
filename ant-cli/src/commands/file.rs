@@ -162,7 +162,11 @@ pub async fn upload(
 
     // save single private files to local user data
     if !not_single_file && !public {
-        let writer = crate::user_data::write_local_private_file(archive_addr.clone(), local_addr.clone(), &name);
+        let writer = crate::user_data::write_local_private_file(
+            archive_addr.clone(),
+            local_addr.clone(),
+            &name,
+        );
         writer
             .wrap_err("Failed to save private file to local user data")
             .with_suggestion(|| "Local user data saves the file address above to disk, without it you need to keep track of the address yourself")
