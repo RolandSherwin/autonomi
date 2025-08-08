@@ -220,33 +220,29 @@ impl ReachabilityCheckSwarmDriver {
             SwarmEvent::Behaviour(ReachabilityCheckEvent::Upnp(upnp_event)) => {
                 event_string = "upnp_event";
                 info!(?upnp_event, "UPnP event");
-                let mut upnp_result_obtained = false;
                 match upnp_event {
                     libp2p::upnp::Event::GatewayNotFound => {
                         info!("UPnP gateway not found. Trying to dial peers.");
                         self.upnp_supported = false;
-                        upnp_result_obtained = true;
                     }
                     libp2p::upnp::Event::NewExternalAddr(addr) => {
                         info!(
                             "UPnP: New external address: {addr:?}. Trying to dial peers to confirm reachability."
                         );
                         self.upnp_supported = true;
-                        upnp_result_obtained = false;
                     }
                     libp2p::upnp::Event::NonRoutableGateway => {
                         warn!("UPnP gateway is not routable. Trying to dial peers.");
                         self.upnp_supported = false;
-                        upnp_result_obtained = true;
                     }
                     _ => {
                         info!("UPnP event (ignored): {upnp_event:?}");
                     }
                 }
 
-                if upnp_result_obtained {
-                    self.trigger_dial()?;
-                }
+                // mapping will be created by the listener.rs step for our port, so we can just trigger dial anytime
+                // and it should go via the UPnP mapped address.
+                self.trigger_dial()?;
             }
             SwarmEvent::IncomingConnection {
                 connection_id,
