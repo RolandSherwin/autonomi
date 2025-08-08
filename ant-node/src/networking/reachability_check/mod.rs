@@ -242,9 +242,9 @@ impl ReachabilityCheckSwarmDriver {
                         self.upnp_supported = false;
                         upnp_result_obtained = true;
                     }
-                    upnp::behaviour::Event::NewExternalAddr(addr) => {
+                    upnp::behaviour::Event::NewExternalAddr { addr, local_addr } => {
                         info!(
-                            "UPnP: New external address: {addr:?}. Trying to dial peers to confirm reachability."
+                            "UPnP: New external address: {addr:?}, local address: {local_addr:?}. Trying to dial peers to confirm reachability."
                         );
                         self.upnp_supported = true;
                         upnp_result_obtained = false;
@@ -254,8 +254,10 @@ impl ReachabilityCheckSwarmDriver {
                         self.upnp_supported = false;
                         upnp_result_obtained = true;
                     }
-                    _ => {
-                        info!("UPnP event (ignored): {upnp_event:?}");
+                    upnp::behaviour::Event::ExpiredExternalAddr { addr, local_addr } => {
+                        info!(
+                            "UPnP: External address expired: {addr:?}, local address: {local_addr:?}"
+                        );
                     }
                 }
 
