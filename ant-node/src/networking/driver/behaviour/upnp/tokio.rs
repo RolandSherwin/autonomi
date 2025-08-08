@@ -18,13 +18,15 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-use super::behaviour::{GatewayEvent, GatewayRequest};
-use futures::{
-    SinkExt, StreamExt,
-    channel::{mpsc, oneshot},
-};
+use super::behaviour::GatewayEvent;
+use super::behaviour::GatewayRequest;
+use futures::SinkExt;
+use futures::StreamExt;
+use futures::channel::mpsc;
+use futures::channel::oneshot;
 use igd_next::SearchOptions;
-use std::{error::Error, net::IpAddr};
+use std::error::Error;
+use std::net::IpAddr;
 
 // TODO: remove when `IpAddr::is_global` stabilizes.
 pub(crate) fn is_addr_global(addr: IpAddr) -> bool {
@@ -93,23 +95,29 @@ pub(crate) fn search_gateway() -> oneshot::Receiver<Result<Gateway, Box<dyn Erro
     let (events_sender, mut task_receiver) = mpsc::channel(10);
     let (mut task_sender, events_queue) = mpsc::channel(0);
 
+    #[allow(clippy::let_underscore_future)]
     let _ = tokio::spawn(async move {
         let gateway = match igd_next::aio::tokio::search_gateway(SearchOptions::default()).await {
             Ok(gateway) => gateway,
             Err(err) => {
+                error!("Error searching for UPnP gateway: {err}");
                 let _ = search_result_sender.send(Err(err.into()));
                 return;
             }
         };
+
+        info!("Found upnp gateway: {gateway:?}");
 
         let external_addr = match gateway.get_external_ip().await {
             Ok(addr) => addr,
             Err(err) => {
+                error!("Error getting external address from UPnP gateway: {err}");
                 let _ = search_result_sender.send(Err(err.into()));
                 return;
             }
         };
 
+        info!("External address found from UPnP gateway: {external_addr}");
         // Check if receiver dropped.
         if search_result_sender
             .send(Ok(Gateway {
@@ -130,6 +138,7 @@ pub(crate) fn search_gateway() -> oneshot::Receiver<Result<Gateway, Box<dyn Erro
             let event = match req {
                 GatewayRequest::AddMapping { mapping, duration } => {
                     let gateway = gateway.clone();
+                    info!("Trying to add port mapping {mapping:?} for {duration:?}");
                     match gateway
                         .add_port(
                             mapping.protocol,
@@ -140,18 +149,37 @@ pub(crate) fn search_gateway() -> oneshot::Receiver<Result<Gateway, Box<dyn Erro
                         )
                         .await
                     {
-                        Ok(()) => GatewayEvent::Mapped(mapping),
-                        Err(err) => GatewayEvent::MapFailure(mapping, err.into()),
+                        Ok(()) => {
+                            info!(
+                                "Successfully added UPnP mapping for {:?}",
+                                mapping.listener_id
+                            );
+                            GatewayEvent::Mapped(mapping)
+                        }
+                        Err(err) => {
+                            error!("Failed to add UPnP mapping: {err}");
+                            GatewayEvent::MapFailure(mapping, err.into())
+                        }
                     }
                 }
                 GatewayRequest::RemoveMapping(mapping) => {
                     let gateway = gateway.clone();
+                    info!("Trying to remove UPnP mapping: {mapping:?}");
                     match gateway
                         .remove_port(mapping.protocol, mapping.internal_addr.port())
                         .await
                     {
-                        Ok(()) => GatewayEvent::Removed(mapping),
-                        Err(err) => GatewayEvent::RemovalFailure(mapping, err.into()),
+                        Ok(()) => {
+                            info!(
+                                "Successfully removed UPnP mapping for {:?}",
+                                mapping.listener_id
+                            );
+                            GatewayEvent::Removed(mapping)
+                        }
+                        Err(err) => {
+                            error!("Failed to remove UPnP mapping: {err}");
+                            GatewayEvent::RemovalFailure(mapping, err.into())
+                        }
                     }
                 }
             };

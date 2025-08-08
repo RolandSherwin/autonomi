@@ -23,6 +23,7 @@ use crate::networking::bootstrap::INITIAL_BOOTSTRAP_CHECK_INTERVAL;
 use crate::networking::bootstrap::InitialBootstrap;
 use crate::networking::bootstrap::InitialBootstrapTrigger;
 use crate::networking::circular_vec::CircularVec;
+use crate::networking::driver::behaviour::upnp;
 use crate::networking::driver::kad::U256;
 use crate::networking::error::Result;
 use crate::networking::external_address::ExternalAddressManager;
@@ -109,7 +110,7 @@ pub(super) struct NodeBehaviour {
         libp2p::allow_block_list::Behaviour<libp2p::allow_block_list::BlockedPeers>,
     pub(super) do_not_disturb: behaviour::do_not_disturb::Behaviour,
     pub(super) identify: libp2p::identify::Behaviour,
-    pub(super) upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
+    pub(super) upnp: Toggle<upnp::behaviour::Behaviour>,
     pub(super) relay_client: libp2p::relay::client::Behaviour,
     pub(super) relay_server: Toggle<libp2p::relay::Behaviour>,
     pub(super) kademlia: kad::Behaviour<NodeRecordStore>,
