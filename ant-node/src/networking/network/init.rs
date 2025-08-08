@@ -16,6 +16,7 @@ use crate::networking::bootstrap::InitialBootstrapTrigger;
 use crate::networking::circular_vec::CircularVec;
 use crate::networking::driver::NodeBehaviour;
 use crate::networking::driver::SwarmDriver;
+use crate::networking::driver::behaviour::upnp;
 use crate::networking::driver::network_discovery::NetworkDiscovery;
 use crate::networking::error::NetworkError;
 use crate::networking::error::Result;
@@ -549,7 +550,7 @@ pub(crate) async fn init_reachability_check_swarm(
     };
 
     let behaviour = ReachabilityCheckBehaviour {
-        upnp: libp2p::upnp::tokio::Behaviour::default(),
+        upnp: upnp::behaviour::Behaviour::default(),
         identify,
     };
 

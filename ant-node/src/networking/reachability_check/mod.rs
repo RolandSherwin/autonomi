@@ -37,6 +37,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Instant;
 
+use crate::networking::driver::behaviour::upnp;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
 use crate::networking::reachability_check::listener::get_all_listeners;
@@ -85,19 +86,19 @@ impl ReachabilityStatus {
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "ReachabilityCheckEvent")]
 pub(crate) struct ReachabilityCheckBehaviour {
-    pub(super) upnp: libp2p::upnp::tokio::Behaviour,
+    pub(super) upnp: upnp::behaviour::Behaviour,
     pub(super) identify: libp2p::identify::Behaviour,
 }
 
 /// ReachabilityCheckEvent enum
 #[derive(CustomDebug)]
 pub(crate) enum ReachabilityCheckEvent {
-    Upnp(libp2p::upnp::Event),
+    Upnp(upnp::behaviour::Event),
     Identify(Box<libp2p::identify::Event>),
 }
 
-impl From<libp2p::upnp::Event> for ReachabilityCheckEvent {
-    fn from(event: libp2p::upnp::Event) -> Self {
+impl From<upnp::behaviour::Event> for ReachabilityCheckEvent {
+    fn from(event: upnp::behaviour::Event) -> Self {
         ReachabilityCheckEvent::Upnp(event)
     }
 }
@@ -236,19 +237,19 @@ impl ReachabilityCheckSwarmDriver {
                 info!(?upnp_event, "UPnP event");
                 let mut upnp_result_obtained = false;
                 match upnp_event {
-                    libp2p::upnp::Event::GatewayNotFound => {
+                    upnp::behaviour::Event::GatewayNotFound => {
                         info!("UPnP gateway not found. Trying to dial peers.");
                         self.upnp_supported = false;
                         upnp_result_obtained = true;
                     }
-                    libp2p::upnp::Event::NewExternalAddr(addr) => {
+                    upnp::behaviour::Event::NewExternalAddr(addr) => {
                         info!(
                             "UPnP: New external address: {addr:?}. Trying to dial peers to confirm reachability."
                         );
                         self.upnp_supported = true;
                         upnp_result_obtained = false;
                     }
-                    libp2p::upnp::Event::NonRoutableGateway => {
+                    upnp::behaviour::Event::NonRoutableGateway => {
                         warn!("UPnP gateway is not routable. Trying to dial peers.");
                         self.upnp_supported = false;
                         upnp_result_obtained = true;
