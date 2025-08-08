@@ -9,6 +9,7 @@
 #[cfg(feature = "open-metrics")]
 use crate::networking::MetricsRegistries;
 use crate::networking::NetworkError;
+use crate::networking::driver::behaviour::upnp;
 use crate::networking::multiaddr_get_socket_addr;
 #[cfg(feature = "open-metrics")]
 use crate::networking::transport;
@@ -20,7 +21,6 @@ use libp2p::Transport;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Protocol;
 use libp2p::swarm::SwarmEvent;
-use libp2p::swarm::dummy;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -52,9 +52,9 @@ pub(crate) async fn get_all_listeners(
         transport
     };
 
-    let dummy_behaviour = dummy::Behaviour;
+    let upnp_behaviour = upnp::behaviour::Behaviour::default();
     let swarm_config = libp2p::swarm::Config::with_tokio_executor();
-    let mut swarm = Swarm::new(transport, dummy_behaviour, peer_id, swarm_config);
+    let mut swarm = Swarm::new(transport, upnp_behaviour, peer_id, swarm_config);
     let mut listener_ids = HashSet::new();
 
     // Listen on QUIC
@@ -116,6 +116,35 @@ pub(crate) async fn get_all_listeners(
                     }
                     SwarmEvent::ListenerError { listener_id, error } => {
                         error!("Listener error on {listener_id:?}: {error}");
+                    }
+                    SwarmEvent::Behaviour(upnp::behaviour::Event::NewExternalAddr {
+                        addr,
+                        local_addr,
+                    }) => {
+                        info!(
+                            "UPnP mapped external address: {addr} for local address {local_addr}. Returning the local address as the only listen address."
+                        );
+                        if let Some(socket_addr) = multiaddr_get_socket_addr(&local_addr) {
+                            return Ok(HashSet::from([socket_addr]));
+                        } else {
+                            error!("Failed to parse socket address from UPnP address {addr:?}");
+                        }
+
+                        last_address_time = Instant::now();
+                    }
+                    SwarmEvent::Behaviour(upnp::behaviour::Event::ExpiredExternalAddr {
+                        addr,
+                        local_addr,
+                    }) => {
+                        info!(
+                            "UPnP external address expired: {addr} for local address {local_addr}"
+                        );
+                    }
+                    SwarmEvent::Behaviour(upnp::behaviour::Event::GatewayNotFound) => {
+                        error!("No UPnP gateway found")
+                    }
+                    SwarmEvent::Behaviour(upnp::behaviour::Event::NonRoutableGateway) => {
+                        error!("UPnP gateway is not routable");
                     }
                     _ => {
                         // Other events are not relevant for collecting listen addresses
