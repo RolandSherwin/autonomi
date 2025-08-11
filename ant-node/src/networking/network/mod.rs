@@ -45,6 +45,7 @@ mod init;
 
 pub(crate) use init::NetworkConfig;
 pub(crate) use init::init_reachability_check_swarm;
+pub(crate) use init::listen_on_with_retry;
 
 #[derive(Clone, Debug)]
 /// API to interact with the underlying Swarm

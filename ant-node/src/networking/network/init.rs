@@ -53,6 +53,7 @@ use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::Transport as _;
 use libp2p::core::muxing::StreamMuxerBox;
+use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad;
 use libp2p::multiaddr::Protocol;
@@ -86,6 +87,9 @@ const NETWORKING_CHANNEL_SIZE: usize = 10_000;
 
 /// Time before a Kad query times out if no response is received
 const KAD_QUERY_TIMEOUT_S: Duration = Duration::from_secs(10);
+
+/// Timeout for listening on a local address
+const LISTEN_TIMEOUT_S: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 pub(crate) struct NetworkConfig {
@@ -196,22 +200,7 @@ pub(super) fn init_driver(
     let addr_quic = Multiaddr::from(listen_socket_addr.ip())
         .with(Protocol::Udp(listen_socket_addr.port()))
         .with(Protocol::QuicV1);
-    if listen_socket_addr.port() != 0 {
-        let start_time = std::time::Instant::now();
-        let timeout = Duration::from_secs(300); // 5 minutes
-        while swarm_driver.swarm.listen_on(addr_quic.clone()).is_err() {
-            if start_time.elapsed() > timeout {
-                panic!("Failed to listen on QUIC address {addr_quic:?} after 5 minutes");
-            }
-            warn!("Failed to listen on QUIC address {addr_quic:?}, retrying...");
-            std::thread::sleep(Duration::from_secs(1));
-        }
-    } else {
-        let _ = swarm_driver
-            .swarm
-            .listen_on(addr_quic.clone())
-            .expect("Failed to listen on QUIC address");
-    }
+    let _listener_id = listen_on_with_retry(&mut swarm_driver.swarm, addr_quic.clone())?;
     info!("Listening on QUIC address: {addr_quic:?}");
     Ok((swarm_driver, events_receiver))
 }
@@ -571,6 +560,32 @@ pub(crate) async fn init_reachability_check_swarm(
     .await?;
 
     Ok(swarm_driver)
+}
+
+pub(crate) fn listen_on_with_retry<TBehaviour: libp2p::swarm::NetworkBehaviour>(
+    swarm: &mut Swarm<TBehaviour>,
+    addr: libp2p::core::multiaddr::Multiaddr,
+) -> Result<ListenerId> {
+    let start_time = std::time::Instant::now();
+    loop {
+        match swarm.listen_on(addr.clone()) {
+            Ok(listener_id) => {
+                return Ok(listener_id);
+            }
+            Err(err) => {
+                error!("Failed to listen on QUIC address {addr:?}: {err}");
+
+                if start_time.elapsed() > LISTEN_TIMEOUT_S {
+                    error!(
+                        "Failed to listen on QUIC address {addr:?} after {} seconds",
+                        LISTEN_TIMEOUT_S.as_secs()
+                    );
+                    return Err(NetworkError::ListenFailed(addr));
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
 }
 
 fn check_and_wipe_storage_dir_if_necessary(

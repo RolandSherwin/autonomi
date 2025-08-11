@@ -21,7 +21,6 @@ use futures::StreamExt;
 use libp2p::Multiaddr;
 use libp2p::Swarm;
 use libp2p::core::ConnectedPoint;
-use libp2p::core::transport::ListenerId;
 use libp2p::identify;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Protocol;
@@ -31,15 +30,14 @@ use libp2p::swarm::NetworkBehaviour;
 use libp2p::swarm::SwarmEvent;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::dial_opts::PeerCondition;
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Instant;
 
 use crate::networking::driver::behaviour::upnp;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
+use crate::networking::network::listen_on_with_retry;
 use crate::networking::reachability_check::listener::get_all_listeners;
 
 /// The maximum number of peers to dial concurrently during the reachability check.
@@ -148,21 +146,14 @@ impl ReachabilityCheckSwarmDriver {
             return Err(NetworkError::NoListenAddressesFound);
         }
 
-        let mut listeners: HashMap<ListenerId, HashSet<IpAddr>> = HashMap::new();
         for listen_addr in observed_listeners {
             // Listen on QUIC
             let addr_quic = Multiaddr::from(listen_addr.ip())
                 .with(Protocol::Udp(listen_addr.port()))
                 .with(Protocol::QuicV1);
 
-            let listen_id = swarm
-                .listen_on(addr_quic.clone())
-                .expect("Multiaddr should be supported by our configured transports");
-
-            info!("Listening on {listen_id:?} with addr: {addr_quic:?}");
-
-            let ip_addr = listen_addr.ip();
-            let _ = listeners.entry(listen_id).or_default().insert(ip_addr);
+            let listener_id = listen_on_with_retry(&mut swarm, addr_quic.clone())?;
+            info!("Listening on {listener_id:?} with addr: {addr_quic:?}");
         }
 
         Ok(Self {
