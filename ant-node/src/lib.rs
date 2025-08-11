@@ -50,6 +50,7 @@ pub use self::event::NodeEvent;
 pub use self::event::NodeEventsChannel;
 pub use self::event::NodeEventsReceiver;
 pub use self::log_markers::Marker;
+pub use self::networking::ReachabilityIssue;
 pub use self::networking::ReachabilityStatus;
 pub use self::networking::sort_peers_by_key;
 pub use self::node::NodeBuilder;

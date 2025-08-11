@@ -33,6 +33,7 @@ pub use self::interface::SwarmLocalState;
 pub(crate) use self::network::Network;
 pub(crate) use self::network::NetworkConfig;
 pub(crate) use self::network::init_reachability_check_swarm;
+pub use self::reachability_check::ReachabilityIssue;
 pub use self::reachability_check::ReachabilityStatus;
 pub(crate) use self::record_store::NodeRecordStore;
 
