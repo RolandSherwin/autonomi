@@ -80,6 +80,9 @@ pub enum FileCmd {
     Cost {
         /// The file to estimate cost for.
         file: String,
+        /// Use single node payment mode for cost estimation.
+        #[arg(long)]
+        single_node_payment: bool,
     },
 
     /// Upload a file and pay for it. Data on the Network is private by default.
@@ -100,6 +103,11 @@ pub enum FileCmd {
         #[arg(long)]
         #[clap(default_value = "0")]
         retry_failed: u64,
+        /// Use single node payment mode. Pay only the highest priced node with 10x that amount instead of paying 3 nodes.
+        /// Data is still stored on 5 nodes.
+        /// This saves on gas fees but increases upload token cost.
+        #[arg(long)]
+        single_node_payment: bool,
         #[command(flatten)]
         transaction_opt: TransactionOpt,
     },
@@ -443,12 +451,16 @@ pub async fn handle_subcommand(opt: Opt) -> Result<()> {
 
     match cmd {
         Some(SubCmd::File { command }) => match command {
-            FileCmd::Cost { file } => file::cost(&file, network_context).await,
+            FileCmd::Cost {
+                file,
+                single_node_payment,
+            } => file::cost(&file, network_context, single_node_payment).await,
             FileCmd::Upload {
                 file,
                 public,
                 no_archive,
                 retry_failed,
+                single_node_payment,
                 transaction_opt,
             } => {
                 if let Err((err, exit_code)) = file::upload(
@@ -458,6 +470,7 @@ pub async fn handle_subcommand(opt: Opt) -> Result<()> {
                     network_context,
                     transaction_opt.max_fee_per_gas,
                     retry_failed,
+                    single_node_payment,
                 )
                 .await
                 {
