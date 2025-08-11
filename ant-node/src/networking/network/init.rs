@@ -64,6 +64,7 @@ use libp2p::request_response::cbor::codec::Codec as CborCodec;
 use libp2p::request_response::{self};
 use libp2p::swarm::StreamProtocol;
 use libp2p::swarm::Swarm;
+use libp2p::swarm::behaviour::toggle::Toggle;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::fs;
@@ -538,10 +539,12 @@ pub(crate) async fn init_reachability_check_swarm(
         libp2p::identify::Behaviour::new(cfg)
     };
 
-    let behaviour = ReachabilityCheckBehaviour {
-        upnp: upnp::behaviour::Behaviour::default(),
-        identify,
+    let upnp: Toggle<upnp::behaviour::Behaviour> = if !config.no_upnp {
+        Some(upnp::behaviour::Behaviour::default()).into()
+    } else {
+        None.into()
     };
+    let behaviour = ReachabilityCheckBehaviour { upnp, identify };
 
     let swarm_config = libp2p::swarm::Config::with_tokio_executor()
         .with_idle_connection_timeout(CONNECTION_KEEP_ALIVE_TIMEOUT);
@@ -554,6 +557,7 @@ pub(crate) async fn init_reachability_check_swarm(
         config.local,
         config.listen_addr,
         config.initial_contacts,
+        config.no_upnp,
         #[cfg(feature = "open-metrics")]
         metrics_recorder,
     )
