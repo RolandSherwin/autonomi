@@ -14,6 +14,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
+    time::Duration,
 };
 
 /// The types of metrics that are exposed via the various endpoints.
@@ -27,12 +28,28 @@ pub(crate) struct MetricsRegistries {
 const METRICS_CONTENT_TYPE: &str = "application/openmetrics-text;charset=utf-8;version=1.0.0";
 
 pub(crate) fn run_metrics_server(registries: MetricsRegistries, port: u16) {
-    // todo: containers don't work with localhost.
     let addr = ([127, 0, 0, 1], port).into();
 
     #[allow(clippy::let_underscore_future)]
     let _ = tokio::spawn(async move {
-        let server = Server::bind(&addr).serve(MakeMetricService::new(registries));
+        let mut retries = 0;
+        let builder = loop {
+            if retries >= 10 {
+                error!("Failed to bind metrics server on {addr:?} after 10 attempts");
+                return;
+            }
+            match Server::try_bind(&addr) {
+                Err(e) => {
+                    error!("Failed to bind metrics server on {addr:?}: {e}");
+                    retries += 1;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                Ok(builder) => break builder,
+            }
+        };
+
+        let server = builder.serve(MakeMetricService::new(registries));
         // keep these for programs that might be grepping this info
         info!("Metrics server on http://{}/metrics", server.local_addr());
         println!("Metrics server on http://{}/metrics", server.local_addr());
@@ -42,8 +59,8 @@ pub(crate) fn run_metrics_server(registries: MetricsRegistries, port: u16) {
             server.local_addr()
         );
         // run the server forever
-        if let Err(e) = server.await {
-            error!("server error: {}", e);
+        if let Err(err) = server.await {
+            error!("Metrics server error: {err}");
         }
     });
 }
