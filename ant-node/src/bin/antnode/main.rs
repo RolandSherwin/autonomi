@@ -422,17 +422,19 @@ async fn run_node(
         info!("Running reachability check ... This might take a few minutes to complete.");
         let status = node_builder.run_reachability_check().await;
         match status {
-            Ok(ReachabilityStatus::Reachable { addr, upnp }) => {
+            Ok(ReachabilityStatus::Reachable {
+                local_addr, upnp, ..
+            }) => {
                 info!(
                     "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}",
-                    addr.ip()
+                    local_addr.ip()
                 );
                 println!(
                     "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}.",
-                    addr.ip()
+                    local_addr.ip()
                 );
                 node_builder.no_upnp(!upnp);
-                node_builder.with_socket_addr(addr);
+                node_builder.with_socket_addr(local_addr);
             }
             Ok(ReachabilityStatus::NotReachable { .. }) => {
                 info!(

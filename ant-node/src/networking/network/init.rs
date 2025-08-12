@@ -25,8 +25,6 @@ use crate::networking::metrics::MetadataRecorder;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
 #[cfg(feature = "open-metrics")]
-use crate::networking::metrics::ReachabilityStatusMetric;
-#[cfg(feature = "open-metrics")]
 use crate::networking::metrics::service::run_metrics_server;
 use crate::networking::reachability_check::ReachabilityCheckBehaviour;
 use crate::networking::reachability_check::ReachabilityCheckSwarmDriver;
@@ -272,13 +270,8 @@ fn init_swarm_driver(
 
     #[cfg(feature = "open-metrics")]
     let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
-        let reachability_check_metric = if let Some(status) = config.reachability_status {
-            ReachabilityStatusMetric::Status(status)
-        } else {
-            ReachabilityStatusMetric::NotPerformed
-        };
         let metrics_recorder =
-            NetworkMetricsRecorder::new(&mut metrics_registries, reachability_check_metric);
+            NetworkMetricsRecorder::new(&mut metrics_registries, &config.reachability_status);
         let mut metadata_recorder = MetadataRecorder::new(&mut metrics_registries);
         metadata_recorder.register_peer_id(&peer_id);
         metadata_recorder.register_identify_protocol_string(identify_protocol_str.clone());
@@ -522,7 +515,10 @@ pub(crate) async fn init_reachability_check_swarm(
     #[cfg(feature = "open-metrics")]
     let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
         let metrics_recorder =
-            NetworkMetricsRecorder::new(&mut metrics_registries, ReachabilityStatusMetric::Ongoing);
+            NetworkMetricsRecorder::new(&mut metrics_registries, &config.reachability_status);
+        // set the reachability_check_progress gauge to 0.01 to denote in progress
+        let _ = metrics_recorder.reachability_check_progress.set(0.01);
+
         let mut metadata_recorder = MetadataRecorder::new(&mut metrics_registries);
         metadata_recorder.register_peer_id(&peer_id);
         metadata_recorder.register_identify_protocol_string(identify_protocol_str.clone());

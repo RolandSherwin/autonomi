@@ -13,6 +13,7 @@ mod relay_client;
 pub(super) mod service;
 mod upnp;
 
+use crate::ReachabilityStatus;
 use crate::networking::MetricsRegistries;
 use crate::networking::log_markers::Marker;
 use bad_node::BadNodeMetrics;
@@ -26,7 +27,6 @@ use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::family::Family;
 use prometheus_client::metrics::gauge::Gauge;
-pub(crate) use reachability_check::ReachabilityStatusMetric;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use sysinfo::Pid;
@@ -64,6 +64,7 @@ pub(crate) struct NetworkMetricsRecorder {
     pub(crate) records_stored: Gauge,
     pub(crate) relay_reservation_health: Gauge<f64, AtomicU64>,
     pub(crate) node_versions: Family<VersionLabels, Gauge>,
+    pub(crate) reachability_check_progress: Gauge<f64, AtomicU64>,
 
     // quoting metrics
     relevant_records: Gauge,
@@ -92,7 +93,7 @@ pub(crate) struct NetworkMetricsRecorder {
 impl NetworkMetricsRecorder {
     pub(crate) fn new(
         registries: &mut MetricsRegistries,
-        reachability_check_metric: ReachabilityStatusMetric,
+        reachability_status: &Option<ReachabilityStatus>,
     ) -> Self {
         // ==== Standard metrics =====
 
@@ -102,13 +103,26 @@ impl NetworkMetricsRecorder {
             .sub_registry_with_prefix("ant_networking");
 
         // reachability check should be a part of the standard metrics and is a gauge value, but never changes.
-        let reachability_check_metric =
-            reachability_check::get_reachability_status_metric(reachability_check_metric);
+        let reachability_adapter_metric =
+            reachability_check::get_reachability_adapter_metric(reachability_status);
 
         sub_registry.register(
-            "reachability_status",
-            "The reachability status of the node.",
-            reachability_check_metric,
+            "reachability_adapter",
+            "The reachability adapter status of the node.",
+            reachability_adapter_metric,
+        );
+
+        let reachability_check_progress = Gauge::<f64, AtomicU64>::default();
+        // set to 1 if reachability_status is found
+        if reachability_status.is_some() {
+            let _ = reachability_check_progress.set(1.0);
+        } else {
+            let _ = reachability_check_progress.set(0.0);
+        }
+        sub_registry.register(
+            "reachability_check_progress",
+            "Progress indicator for reachability check. 0 = not started, between 0-1 = in progress, 1 = completed",
+            reachability_check_progress.clone(),
         );
 
         let records_stored = Gauge::default();
@@ -294,6 +308,7 @@ impl NetworkMetricsRecorder {
             received_payment_count,
             live_time,
             node_versions,
+            reachability_check_progress,
 
             bad_peers_count,
             shunned_count_across_time_frames,
