@@ -8,6 +8,7 @@
 
 mod identify;
 mod kad;
+mod listen_addr_writer;
 mod request_response;
 mod swarm;
 
@@ -15,17 +16,17 @@ pub(crate) use identify::DIAL_BACK_DELAY;
 
 use crate::networking::NetworkEvent;
 use crate::networking::{
-    Addresses, driver::SwarmDriver, error::Result, relay_manager::is_a_relayed_peer,
+    driver::SwarmDriver, error::Result, relay_manager::is_a_relayed_peer, Addresses,
 };
 use ant_protocol::messages::ConnectionInfo;
 use custom_debug::Debug as CustomDebug;
 use libp2p::kad::K_VALUE;
-use libp2p::{PeerId, request_response::ResponseChannel as PeerResponseChannel};
+use libp2p::{request_response::ResponseChannel as PeerResponseChannel, PeerId};
 
 use ant_protocol::CLOSE_GROUP_SIZE;
 use ant_protocol::{
-    NetworkAddress,
     messages::{Request, Response},
+    NetworkAddress,
 };
 #[cfg(feature = "open-metrics")]
 use std::collections::HashSet;
