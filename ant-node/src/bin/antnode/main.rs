@@ -434,12 +434,12 @@ async fn run_node(
                 node_builder.no_upnp(!upnp);
                 node_builder.with_socket_addr(addr);
             }
-            Ok(ReachabilityStatus::NotRoutable { .. }) => {
+            Ok(ReachabilityStatus::NotReachable { .. }) => {
                 info!(
-                    "Reachability check: NotRoutable. Terminating node as we are not externally reachable."
+                    "Reachability check: NotReachable. Terminating node as we are not externally reachable."
                 );
                 println!(
-                    "Reachability check: NotRoutable. Terminating node as we are not externally reachable."
+                    "Reachability check: NotReachable. Terminating node as we are not externally reachable."
                 );
                 return Err(eyre!(
                     "Terminating node as we are not externally reachable."

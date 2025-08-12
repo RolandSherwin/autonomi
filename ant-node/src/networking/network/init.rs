@@ -16,7 +16,6 @@ use crate::networking::bootstrap::InitialBootstrapTrigger;
 use crate::networking::circular_vec::CircularVec;
 use crate::networking::driver::NodeBehaviour;
 use crate::networking::driver::SwarmDriver;
-use crate::networking::driver::behaviour::upnp;
 use crate::networking::driver::network_discovery::NetworkDiscovery;
 use crate::networking::error::NetworkError;
 use crate::networking::error::Result;
@@ -64,7 +63,6 @@ use libp2p::request_response::cbor::codec::Codec as CborCodec;
 use libp2p::request_response::{self};
 use libp2p::swarm::StreamProtocol;
 use libp2p::swarm::Swarm;
-use libp2p::swarm::behaviour::toggle::Toggle;
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::fs;
@@ -555,12 +553,7 @@ pub(crate) async fn init_reachability_check_swarm(
         libp2p::identify::Behaviour::new(cfg)
     };
 
-    let upnp: Toggle<upnp::behaviour::Behaviour> = if !config.no_upnp {
-        Some(upnp::behaviour::Behaviour::default()).into()
-    } else {
-        None.into()
-    };
-    let behaviour = ReachabilityCheckBehaviour { upnp, identify };
+    let behaviour = ReachabilityCheckBehaviour { identify };
 
     let swarm_config = libp2p::swarm::Config::with_tokio_executor()
         .with_idle_connection_timeout(CONNECTION_KEEP_ALIVE_TIMEOUT);

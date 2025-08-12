@@ -27,14 +27,12 @@ use libp2p::swarm::ConnectionId;
 use libp2p::swarm::DialError;
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::swarm::SwarmEvent;
-use libp2p::swarm::behaviour::toggle::Toggle;
 use libp2p::swarm::dial_opts::DialOpts;
 use libp2p::swarm::dial_opts::PeerCondition;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::time::Instant;
 
-use crate::networking::driver::behaviour::upnp;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
 use crate::networking::network::listen_on_with_retry;
@@ -121,21 +119,13 @@ impl ReachabilityIssue {
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "ReachabilityCheckEvent")]
 pub(crate) struct ReachabilityCheckBehaviour {
-    pub(super) upnp: Toggle<upnp::behaviour::Behaviour>,
     pub(super) identify: libp2p::identify::Behaviour,
 }
 
 /// ReachabilityCheckEvent enum
 #[derive(CustomDebug)]
 pub(crate) enum ReachabilityCheckEvent {
-    Upnp(upnp::behaviour::Event),
     Identify(Box<libp2p::identify::Event>),
-}
-
-impl From<upnp::behaviour::Event> for ReachabilityCheckEvent {
-    fn from(event: upnp::behaviour::Event) -> Self {
-        ReachabilityCheckEvent::Upnp(event)
-    }
 }
 
 impl From<libp2p::identify::Event> for ReachabilityCheckEvent {
@@ -169,7 +159,8 @@ impl ReachabilityCheckSwarmDriver {
         let mut swarm = swarm;
 
         println!("Obtaining valid listeners for the reachability check workflow..");
-        let observed_listeners = get_all_listeners(keypair, local, listen_addr, no_upnp).await?;
+        let (observed_listeners, upnp_supported) =
+            get_all_listeners(keypair, local, listen_addr, no_upnp).await?;
 
         if observed_listeners.is_empty() {
             error!("No listen addresses found. Cannot start reachability check.");
@@ -197,7 +188,7 @@ impl ReachabilityCheckSwarmDriver {
         Ok(Self {
             swarm,
             dial_manager: DialManager::new(initial_contacts),
-            upnp_supported: false,
+            upnp_supported,
             #[cfg(feature = "open-metrics")]
             metrics_recorder,
         })
@@ -259,35 +250,6 @@ impl ReachabilityCheckSwarmDriver {
                     "Local node is listening {listener_id:?} on {address:?}. Adding it as an external address."
                 );
                 self.swarm.add_external_address(address.clone());
-            }
-            SwarmEvent::Behaviour(ReachabilityCheckEvent::Upnp(upnp_event)) => {
-                event_string = "upnp_event";
-                info!(?upnp_event, "UPnP event");
-                match upnp_event {
-                    upnp::behaviour::Event::GatewayNotFound => {
-                        info!("UPnP gateway not found. Trying to dial peers.");
-                        self.upnp_supported = false;
-                    }
-                    upnp::behaviour::Event::NewExternalAddr { addr, local_addr } => {
-                        info!(
-                            "UPnP: New external address: {addr:?}, local address: {local_addr:?}. Trying to dial peers to confirm reachability."
-                        );
-                        self.upnp_supported = true;
-                    }
-                    upnp::behaviour::Event::NonRoutableGateway => {
-                        warn!("UPnP gateway is not routable. Trying to dial peers.");
-                        self.upnp_supported = false;
-                    }
-                    upnp::behaviour::Event::ExpiredExternalAddr { addr, local_addr } => {
-                        info!(
-                            "UPnP: External address expired: {addr:?}, local address: {local_addr:?}"
-                        );
-                    }
-                }
-
-                // mapping will be created by the listener.rs step for our port, so we can just trigger dial anytime
-                // and it should go via the UPnP mapped address.
-                self.trigger_dial();
             }
             SwarmEvent::IncomingConnection {
                 connection_id,
