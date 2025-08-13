@@ -237,7 +237,7 @@ impl NodeBuilder {
     ///
     /// Returns an error if there is a problem initializing the `Network`.
     pub async fn build_and_run(self) -> Result<RunningNode> {
-        let mut no_upnp = false;
+        let mut no_upnp = self.no_upnp;
         let mut address = self.addr;
         let mut reachability_status = None;
 
@@ -259,7 +259,11 @@ impl NodeBuilder {
                     );
                     println!("Starting node with socket addr: {local_addr} and UPnP: {upnp:?}");
                     address = local_addr;
-                    no_upnp = !upnp;
+                    if self.no_upnp {
+                        info!("UPnP is disabled via config.");
+                    } else {
+                        no_upnp = !upnp;
+                    }
                 }
                 Ok(ReachabilityStatus::NotReachable { upnp: _, reason }) => {
                     info!("We are not routable, reason: {reason:?}. Terminating the node.");
