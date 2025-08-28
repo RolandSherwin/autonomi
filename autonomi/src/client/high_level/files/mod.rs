@@ -148,18 +148,28 @@ impl Client {
         // Verify that the destination path can be used to create a file.
         if let Err(e) = std::fs::File::create(to_dest) {
             #[cfg(feature = "loud")]
-            println!("Input destination path {to_dest:?} cannot be used for streaming disk flushing: {e}");
+            println!(
+                "Input destination path {to_dest:?} cannot be used for streaming disk flushing: {e}"
+            );
             #[cfg(feature = "loud")]
-            println!("This file may have been uploaded without a metadata archive. A file name must be provided to download and save it.");
-            info!("Input destination path {to_dest:?} cannot be used for streaming disk flushing: {e}");
+            println!(
+                "This file may have been uploaded without a metadata archive. A file name must be provided to download and save it."
+            );
+            info!(
+                "Input destination path {to_dest:?} cannot be used for streaming disk flushing: {e}"
+            );
             return Err(DownloadError::IoError(e));
         }
-        
+
         // Clean up the temporary verification file
         if let Err(cleanup_err) = std::fs::remove_file(to_dest) {
             #[cfg(feature = "loud")]
-            println!("Warning: Failed to clean up temporary verification file {to_dest:?}: {cleanup_err}");
-            info!("Warning: Failed to clean up temporary verification file {to_dest:?}: {cleanup_err}");
+            println!(
+                "Warning: Failed to clean up temporary verification file {to_dest:?}: {cleanup_err}"
+            );
+            info!(
+                "Warning: Failed to clean up temporary verification file {to_dest:?}: {cleanup_err}"
+            );
             return Err(DownloadError::IoError(cleanup_err));
         }
 
