@@ -29,8 +29,6 @@ use ant_protocol::antnode_proto::UpdateResponse;
 use ant_protocol::antnode_proto::ant_node_server::AntNode;
 use ant_protocol::antnode_proto::ant_node_server::AntNodeServer;
 use ant_protocol::antnode_proto::k_buckets_response;
-use ant_protocol::node_rpc::NodeCtrl;
-use ant_protocol::node_rpc::StopResult;
 use eyre::ErrReport;
 use eyre::Result;
 use std::collections::HashMap;
@@ -39,8 +37,8 @@ use std::net::SocketAddr;
 use std::process;
 use std::time::Duration;
 use std::time::Instant;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::{self};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Code;
 use tonic::Request;
@@ -49,6 +47,30 @@ use tonic::Status;
 use tonic::transport::Server;
 use tracing::debug;
 use tracing::info;
+
+#[derive(Debug)]
+/// To be sent to the main thread in order to stop/restart the execution of the antnode app.
+pub enum NodeCtrl {
+    /// Request to stop the execution of the antnode app, providing an error as a reason for it.
+    Stop {
+        delay: Duration,
+        result: StopResult,
+    },
+    /// Request to restart the execution of the antnode app, retrying to join the network, after the requested delay.
+    /// Set `retain_peer_id` to `true` if you want to re-use the same root dir/secret keys/PeerId.
+    Restart {
+        delay: Duration,
+        retain_peer_id: bool,
+    },
+    // Request to update the antnode app, and restart it, after the requested delay.
+    Update(Duration),
+}
+
+#[derive(Debug)]
+pub enum StopResult {
+    Success(String),
+    Error(Box<ant_node::Error>),
+}
 
 // Defining a struct to hold information used by our gRPC service backend
 struct SafeNodeRpcService {

@@ -15,4 +15,3 @@ pub(crate) use local_cmd::NodeIssue;
 pub use local_cmd::SwarmLocalState;
 pub(crate) use network_cmd::NetworkSwarmCmd;
 pub(crate) use network_event::NetworkEvent;
-pub(crate) use network_event::TerminateNodeReason;

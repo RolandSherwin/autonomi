@@ -7,13 +7,13 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use super::SwarmDriver;
+use crate::event::TerminateNodeReason;
 use crate::networking::NetworkEvent;
 use crate::networking::NodeIssue;
 use crate::networking::Result;
 use crate::networking::driver::behaviour::upnp;
 use crate::networking::error::dial_error_to_str;
 use crate::networking::error::listen_error_to_str;
-use crate::networking::interface::TerminateNodeReason;
 use crate::networking::network::endpoint_str;
 use itertools::Itertools;
 use libp2p::Multiaddr;

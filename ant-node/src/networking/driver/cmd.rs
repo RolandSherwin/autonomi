@@ -6,6 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use crate::event::TerminateNodeReason;
 use crate::networking::Addresses;
 use crate::networking::CLOSE_GROUP_SIZE;
 use crate::networking::NetworkEvent;
@@ -18,7 +19,6 @@ use crate::networking::error::NetworkError;
 use crate::networking::error::Result;
 use crate::networking::interface::LocalSwarmCmd;
 use crate::networking::interface::NetworkSwarmCmd;
-use crate::networking::interface::TerminateNodeReason;
 use crate::networking::log_markers::Marker;
 use ant_evm::PaymentQuote;
 use ant_protocol::NetworkAddress;
