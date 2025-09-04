@@ -396,12 +396,11 @@ impl App {
                 .get_focus_stack()
                 .contains(&component.focus_target());
 
-            if should_draw
-                && let Err(e) = component.draw(f, f.area()) {
-                    action_tx
-                        .send(Action::Error(format!("Failed to draw: {e:?}")))
-                        .unwrap();
-                }
+            if should_draw && let Err(e) = component.draw(f, f.area()) {
+                action_tx
+                    .send(Action::Error(format!("Failed to draw: {e:?}")))
+                    .unwrap();
+            }
         }
     }
 

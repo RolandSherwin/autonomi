@@ -16,29 +16,38 @@ use crate::{
 };
 use ant_node_manager::config::get_service_log_dir_path;
 use ant_releases::ReleaseType;
+use arboard::Clipboard;
 use color_eyre::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Span},
     widgets::{
         Block, Borders, List, ListItem, ListState, Padding, Paragraph, Scrollbar,
-        ScrollbarOrientation, ScrollbarState,
+        ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
 use std::{
     fs,
     io::{BufRead, BufReader},
 };
+use tracing::error;
 
-#[derive(Default)]
 pub struct NodeLogsPopup {
     node_name: String,
     logs: Vec<String>,
     list_state: ListState,
     scroll_state: ScrollbarState,
     is_following_tail: bool,
+    selection_start: Option<usize>,
+    selection_end: Option<usize>,
+    is_selecting: bool,
+    word_wrap_enabled: bool,
+    word_wrap_scroll_offset: usize,
+    word_wrap_cursor_offset: usize,
+    word_wrap_window_size: usize,
+    clipboard: Option<Clipboard>,
 }
 
 impl NodeLogsPopup {
@@ -49,6 +58,14 @@ impl NodeLogsPopup {
             list_state: ListState::default(),
             scroll_state: ScrollbarState::default(),
             is_following_tail: true,
+            selection_start: None,
+            selection_end: None,
+            is_selecting: false,
+            word_wrap_enabled: false,
+            word_wrap_scroll_offset: 0,
+            word_wrap_cursor_offset: 0,
+            word_wrap_window_size: 10,
+            clipboard: Clipboard::new().ok(),
         };
         // Load initial logs
         if let Err(e) = instance.load_logs() {
@@ -71,8 +88,9 @@ impl NodeLogsPopup {
             return Ok(());
         }
 
-        let log_dir =
-            get_service_log_dir_path(ReleaseType::NodeLaunchpad, None, None)?.join(&self.node_name);
+        let log_dir = get_service_log_dir_path(ReleaseType::NodeLaunchpad, None, None)?
+            .join(&self.node_name)
+            .join("logs");
 
         if !log_dir.exists() {
             self.logs = vec![
@@ -183,24 +201,112 @@ impl NodeLogsPopup {
         self.scroll_state = self.scroll_state.content_length(self.logs.len());
     }
 
-    fn handle_scroll_up(&mut self) {
+    fn handle_scroll_up(&mut self, with_shift: bool) {
         self.is_following_tail = false;
+
+        if self.word_wrap_enabled {
+            // In wrap mode, first try to move cursor up, then scroll window
+            if self.word_wrap_cursor_offset > 0 {
+                self.word_wrap_cursor_offset -= 1;
+            } else if self.word_wrap_scroll_offset > 0 {
+                self.word_wrap_scroll_offset = self.word_wrap_scroll_offset.saturating_sub(1);
+            }
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if let Some(selected) = self.list_state.selected() {
             if selected > 0 {
-                self.list_state.select(Some(selected - 1));
-                self.scroll_state = self.scroll_state.position(selected - 1);
+                let new_pos = selected - 1;
+                self.list_state.select(Some(new_pos));
+                self.scroll_state = self.scroll_state.position(new_pos);
+
+                if with_shift {
+                    if !self.is_selecting {
+                        self.start_selection(selected);
+                    }
+                    self.extend_selection(new_pos);
+                } else {
+                    self.clear_selection();
+                }
             }
         } else if !self.logs.is_empty() {
-            self.list_state.select(Some(self.logs.len() - 1));
+            let last_index = self.logs.len() - 1;
+            self.list_state.select(Some(last_index));
+            if with_shift {
+                self.start_selection(last_index);
+            } else {
+                self.clear_selection();
+            }
         }
     }
 
-    fn handle_scroll_down(&mut self) {
+    fn handle_scroll_down(&mut self, with_shift: bool) {
+        if self.word_wrap_enabled {
+            // Calculate current absolute position in logs
+            let current_position = self.word_wrap_scroll_offset + self.word_wrap_cursor_offset;
+
+            // Check if we can move to the next log
+            if current_position < self.logs.len().saturating_sub(1) {
+                let window_size = self.word_wrap_window_size;
+
+                // Calculate actual displayed lines (same logic as in rendering)
+                let start = self
+                    .word_wrap_scroll_offset
+                    .min(self.logs.len().saturating_sub(1));
+                let end = (start + window_size).min(self.logs.len());
+                let actual_lines_displayed = end - start;
+                let max_cursor_in_displayed = actual_lines_displayed.saturating_sub(1);
+
+                // If cursor can move down within the visible window, just move cursor
+                if self.word_wrap_cursor_offset < max_cursor_in_displayed {
+                    self.word_wrap_cursor_offset += 1;
+                } else {
+                    // Cursor is at bottom of window, need to scroll
+                    // Check if we can scroll further
+                    let max_scroll_offset = self.logs.len().saturating_sub(window_size);
+                    if self.word_wrap_scroll_offset < max_scroll_offset {
+                        // Scroll window down
+                        self.word_wrap_scroll_offset += 1;
+
+                        // Recalculate displayed lines for new window position
+                        let new_start = self
+                            .word_wrap_scroll_offset
+                            .min(self.logs.len().saturating_sub(1));
+                        let new_end = (new_start + window_size).min(self.logs.len());
+                        let new_actual_lines = new_end - new_start;
+
+                        // Ensure cursor doesn't exceed the new window bounds
+                        if self.word_wrap_cursor_offset >= new_actual_lines {
+                            self.word_wrap_cursor_offset = new_actual_lines.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+
+            // Don't automatically enable tail following during manual scroll
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if let Some(selected) = self.list_state.selected() {
             if selected < self.logs.len().saturating_sub(1) {
                 let new_pos = selected + 1;
                 self.list_state.select(Some(new_pos));
                 self.scroll_state = self.scroll_state.position(new_pos);
+
+                if with_shift {
+                    if !self.is_selecting {
+                        self.start_selection(selected);
+                    }
+                    self.extend_selection(new_pos);
+                } else {
+                    self.clear_selection();
+                }
 
                 // If we've reached the bottom, enable tail following
                 if new_pos == self.logs.len().saturating_sub(1) {
@@ -209,27 +315,86 @@ impl NodeLogsPopup {
             } else {
                 // Already at the bottom, enable tail following
                 self.is_following_tail = true;
+                if !with_shift {
+                    self.clear_selection();
+                }
             }
         } else if !self.logs.is_empty() {
             self.list_state.select(Some(0));
             self.scroll_state = self.scroll_state.position(0);
+            if with_shift {
+                self.start_selection(0);
+            } else {
+                self.clear_selection();
+            }
         }
     }
 
-    fn handle_page_up(&mut self) {
+    fn handle_page_up(&mut self, with_shift: bool) {
         self.is_following_tail = false;
+
+        if self.word_wrap_enabled {
+            // Page up by moving window and cursor
+            let page_size = 10;
+            if self.word_wrap_scroll_offset >= page_size {
+                self.word_wrap_scroll_offset -= page_size;
+            } else {
+                self.word_wrap_scroll_offset = 0;
+                self.word_wrap_cursor_offset = 0;
+            }
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if let Some(selected) = self.list_state.selected() {
             let new_pos = selected.saturating_sub(10);
             self.list_state.select(Some(new_pos));
             self.scroll_state = self.scroll_state.position(new_pos);
+
+            if with_shift {
+                if !self.is_selecting {
+                    self.start_selection(selected);
+                }
+                self.extend_selection(new_pos);
+            } else {
+                self.clear_selection();
+            }
         }
     }
 
-    fn handle_page_down(&mut self) {
+    fn handle_page_down(&mut self, with_shift: bool) {
+        if self.word_wrap_enabled {
+            // Page down by moving window
+            let page_size = 10;
+            let window_size = self.word_wrap_window_size;
+            let max_scroll_offset = self.logs.len().saturating_sub(window_size);
+            let new_offset = (self.word_wrap_scroll_offset + page_size).min(max_scroll_offset);
+
+            self.word_wrap_scroll_offset = new_offset;
+            // Reset cursor to top of new window
+            self.word_wrap_cursor_offset = 0;
+            // Don't automatically enable tail following during page down
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if let Some(selected) = self.list_state.selected() {
             let new_pos = (selected + 10).min(self.logs.len().saturating_sub(1));
             self.list_state.select(Some(new_pos));
             self.scroll_state = self.scroll_state.position(new_pos);
+
+            if with_shift {
+                if !self.is_selecting {
+                    self.start_selection(selected);
+                }
+                self.extend_selection(new_pos);
+            } else {
+                self.clear_selection();
+            }
 
             if new_pos >= self.logs.len().saturating_sub(1) {
                 self.is_following_tail = true;
@@ -237,20 +402,159 @@ impl NodeLogsPopup {
         }
     }
 
-    fn handle_home(&mut self) {
+    fn handle_home(&mut self, with_shift: bool) {
         self.is_following_tail = false;
+
+        if self.word_wrap_enabled {
+            self.word_wrap_scroll_offset = 0;
+            self.word_wrap_cursor_offset = 0;
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if !self.logs.is_empty() {
+            if with_shift {
+                if let Some(selected) = self.list_state.selected() {
+                    if !self.is_selecting {
+                        self.start_selection(selected);
+                    }
+                    self.extend_selection(0);
+                }
+            } else {
+                self.clear_selection();
+            }
             self.list_state.select(Some(0));
             self.scroll_state = self.scroll_state.position(0);
         }
     }
 
-    fn handle_end(&mut self) {
+    fn handle_end(&mut self, with_shift: bool) {
+        if self.word_wrap_enabled {
+            // In wrap mode, End key should enable tail following
+            self.word_wrap_scroll_offset = 0; // Reset to 0 since tail following will show last logs
+            self.word_wrap_cursor_offset = 0; // Cursor doesn't matter in tail mode
+            self.is_following_tail = true;
+            if !with_shift {
+                self.clear_selection();
+            }
+            return;
+        }
+
         if !self.logs.is_empty() {
             let last_index = self.logs.len() - 1;
+            if with_shift {
+                if let Some(selected) = self.list_state.selected() {
+                    if !self.is_selecting {
+                        self.start_selection(selected);
+                    }
+                    self.extend_selection(last_index);
+                }
+            } else {
+                self.clear_selection();
+            }
             self.list_state.select(Some(last_index));
             self.scroll_state = self.scroll_state.position(last_index);
             self.is_following_tail = true;
+        }
+    }
+
+    fn get_selection_range(&self) -> Option<(usize, usize)> {
+        match (self.selection_start, self.selection_end) {
+            (Some(start), Some(end)) => {
+                let min = start.min(end);
+                let max = start.max(end);
+                Some((min, max))
+            }
+            _ => None,
+        }
+    }
+
+    fn is_line_selected(&self, index: usize) -> bool {
+        if let Some((start, end)) = self.get_selection_range() {
+            index >= start && index <= end
+        } else {
+            false
+        }
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection_start = None;
+        self.selection_end = None;
+        self.is_selecting = false;
+    }
+
+    fn start_selection(&mut self, index: usize) {
+        self.selection_start = Some(index);
+        self.selection_end = Some(index);
+        self.is_selecting = true;
+    }
+
+    fn extend_selection(&mut self, index: usize) {
+        if self.selection_start.is_none() {
+            self.start_selection(index);
+        } else {
+            self.selection_end = Some(index);
+        }
+    }
+
+    fn select_all(&mut self) {
+        if !self.logs.is_empty() {
+            self.selection_start = Some(0);
+            self.selection_end = Some(self.logs.len() - 1);
+            self.is_selecting = true;
+        }
+    }
+
+    fn get_selected_text(&self) -> String {
+        if let Some((start, end)) = self.get_selection_range() {
+            self.logs[start..=end].join("\n")
+        } else if let Some(current) = self.list_state.selected() {
+            self.logs.get(current).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        }
+    }
+
+    fn copy_to_clipboard(&mut self) -> Result<()> {
+        let text = self.get_selected_text();
+        if !text.is_empty()
+            && let Some(ref mut clipboard) = self.clipboard
+        {
+            clipboard.set_text(text)?;
+        }
+        Ok(())
+    }
+
+    fn toggle_word_wrap(&mut self) {
+        self.word_wrap_enabled = !self.word_wrap_enabled;
+
+        if self.word_wrap_enabled {
+            // Entering wrap mode - convert from list position
+            if self.is_following_tail {
+                self.word_wrap_scroll_offset = 0;
+                self.word_wrap_cursor_offset = 0;
+            } else {
+                let selected = self.list_state.selected().unwrap_or(0);
+                // Show some context around the selected line
+                self.word_wrap_scroll_offset = selected.saturating_sub(5);
+                self.word_wrap_cursor_offset =
+                    selected.saturating_sub(self.word_wrap_scroll_offset).min(5);
+            }
+        } else {
+            // Exiting wrap mode - restore position to list
+            if !self.is_following_tail {
+                let absolute_position = self.word_wrap_scroll_offset + self.word_wrap_cursor_offset;
+                let clamped_position = absolute_position.min(self.logs.len().saturating_sub(1));
+                self.list_state.select(Some(clamped_position));
+                self.scroll_state = self.scroll_state.position(clamped_position);
+            } else {
+                // Keep tail following active
+                let last_index = self.logs.len().saturating_sub(1);
+                self.list_state.select(Some(last_index));
+                self.scroll_state = self.scroll_state.position(last_index);
+            }
         }
     }
 }
@@ -265,30 +569,47 @@ impl Component for NodeLogsPopup {
         key: KeyEvent,
         _focus_manager: &FocusManager,
     ) -> Result<(Vec<Action>, EventResult)> {
+        let shift_pressed = key.modifiers.contains(KeyModifiers::SHIFT);
+        let ctrl_pressed = key.modifiers.contains(KeyModifiers::CONTROL);
+
         let action = match key.code {
             KeyCode::Esc => Action::SwitchScene(Scene::Status),
             KeyCode::Up => {
-                self.handle_scroll_up();
+                self.handle_scroll_up(shift_pressed);
                 return Ok((vec![], EventResult::Consumed));
             }
             KeyCode::Down => {
-                self.handle_scroll_down();
+                self.handle_scroll_down(shift_pressed);
                 return Ok((vec![], EventResult::Consumed));
             }
             KeyCode::PageUp => {
-                self.handle_page_up();
+                self.handle_page_up(shift_pressed);
                 return Ok((vec![], EventResult::Consumed));
             }
             KeyCode::PageDown => {
-                self.handle_page_down();
+                self.handle_page_down(shift_pressed);
                 return Ok((vec![], EventResult::Consumed));
             }
             KeyCode::Home => {
-                self.handle_home();
+                self.handle_home(shift_pressed);
                 return Ok((vec![], EventResult::Consumed));
             }
             KeyCode::End => {
-                self.handle_end();
+                self.handle_end(shift_pressed);
+                return Ok((vec![], EventResult::Consumed));
+            }
+            KeyCode::Char('c') if ctrl_pressed => {
+                if let Err(e) = self.copy_to_clipboard() {
+                    error!("Failed to copy to clipboard: {e}");
+                }
+                return Ok((vec![], EventResult::Consumed));
+            }
+            KeyCode::Char('a') if ctrl_pressed => {
+                self.select_all();
+                return Ok((vec![], EventResult::Consumed));
+            }
+            KeyCode::Char('w') | KeyCode::Char('W') => {
+                self.toggle_word_wrap();
                 return Ok((vec![], EventResult::Consumed));
             }
             _ => return Ok((vec![], EventResult::Ignored)),
@@ -342,26 +663,78 @@ impl Component for NodeLogsPopup {
             .margin(1)
             .split(main_layout[1]);
 
-        // Convert logs to ListItems
-        let log_items: Vec<ListItem> = self
-            .logs
-            .iter()
-            .enumerate()
-            .map(|(i, log)| {
-                let style = if Some(i) == self.list_state.selected() {
+        // Render logs based on word wrap setting
+        if self.word_wrap_enabled {
+            // Use window-based approach - no scroll() method, just control which logs are shown
+            let viewport_height = logs_area[0].height as usize;
+            let window_size = (viewport_height / 2).max(10); // Conservative: assume each log takes ~2 lines when wrapped, minimum 10
+
+            // Store the actual window size for scroll handlers to use
+            self.word_wrap_window_size = window_size;
+
+            let display_logs = if self.is_following_tail {
+                // Show the last 'window_size' logs
+                let start = self.logs.len().saturating_sub(window_size);
+                &self.logs[start..]
+            } else {
+                // Show logs from scroll position (word_wrap_scroll_offset is now log line index)
+                let start = self
+                    .word_wrap_scroll_offset
+                    .min(self.logs.len().saturating_sub(1));
+                let end = (start + window_size).min(self.logs.len());
+                &self.logs[start..end]
+            };
+
+            // Calculate display cursor position without modifying state
+            let actual_lines_displayed = display_logs.len();
+            let display_cursor = self
+                .word_wrap_cursor_offset
+                .min(actual_lines_displayed.saturating_sub(1));
+
+            // Build styled text with cursor highlighting
+            let mut text_lines = Vec::new();
+            for (i, line) in display_logs.iter().enumerate() {
+                // Highlight the cursor line in wrap mode (unless tail following)
+                let should_highlight = !self.is_following_tail && i == display_cursor;
+                let style = if should_highlight {
                     Style::default().fg(GHOST_WHITE).bg(VERY_LIGHT_AZURE)
                 } else {
                     Style::default().fg(GHOST_WHITE)
                 };
-                ListItem::new(log.clone()).style(style)
-            })
-            .collect();
 
-        let logs_list = List::new(log_items)
-            .style(Style::default().fg(GHOST_WHITE))
-            .highlight_style(Style::default().fg(GHOST_WHITE).bg(VERY_LIGHT_AZURE));
+                text_lines.push(Line::from(Span::styled(line.clone(), style)));
+            }
 
-        f.render_stateful_widget(logs_list, logs_area[0], &mut self.list_state);
+            // Create paragraph WITHOUT scroll - we control which lines are included
+            let paragraph = Paragraph::new(text_lines)
+                .wrap(Wrap { trim: true })
+                .style(Style::default().fg(GHOST_WHITE));
+
+            f.render_widget(paragraph, logs_area[0]);
+        } else {
+            // Use List widget (existing implementation)
+            let log_items: Vec<ListItem> = self
+                .logs
+                .iter()
+                .enumerate()
+                .map(|(i, log)| {
+                    let style = if Some(i) == self.list_state.selected() {
+                        Style::default().fg(GHOST_WHITE).bg(VERY_LIGHT_AZURE)
+                    } else if self.is_line_selected(i) {
+                        Style::default().fg(GHOST_WHITE).bg(LIGHT_PERIWINKLE)
+                    } else {
+                        Style::default().fg(GHOST_WHITE)
+                    };
+                    ListItem::new(log.clone()).style(style)
+                })
+                .collect();
+
+            let logs_list = List::new(log_items)
+                .style(Style::default().fg(GHOST_WHITE))
+                .highlight_style(Style::default().fg(GHOST_WHITE).bg(VERY_LIGHT_AZURE));
+
+            f.render_stateful_widget(logs_list, logs_area[0], &mut self.list_state);
+        }
 
         // Draw scrollbar
         let scrollbar = Scrollbar::default()
@@ -371,20 +744,29 @@ impl Component for NodeLogsPopup {
         f.render_stateful_widget(scrollbar, logs_area[1], &mut self.scroll_state);
 
         // Draw instructions
+        let selection_count = if let Some((start, end)) = self.get_selection_range() {
+            format!(" {} lines selected", end - start + 1)
+        } else {
+            String::new()
+        };
+
         let instructions = Paragraph::new(vec![
             Line::from(vec![
                 Span::styled("↑/↓", Style::default().fg(EUCALYPTUS).bold()),
                 Span::styled(" Scroll  ", Style::default().fg(GHOST_WHITE)),
-                Span::styled("PgUp/PgDn", Style::default().fg(EUCALYPTUS).bold()),
-                Span::styled(" Page  ", Style::default().fg(GHOST_WHITE)),
-                Span::styled("Home/End", Style::default().fg(EUCALYPTUS).bold()),
-                Span::styled(" Jump", Style::default().fg(GHOST_WHITE)),
+                Span::styled("Shift+↑/↓", Style::default().fg(EUCALYPTUS).bold()),
+                Span::styled(" Select  ", Style::default().fg(GHOST_WHITE)),
+                Span::styled("Ctrl+C", Style::default().fg(EUCALYPTUS).bold()),
+                Span::styled(" Copy", Style::default().fg(GHOST_WHITE)),
             ]),
             Line::from(vec![
                 Span::styled("ESC", Style::default().fg(RED).bold()),
                 Span::styled(" Close  ", Style::default().fg(GHOST_WHITE)),
-                Span::styled("[TAIL]", Style::default().fg(EUCALYPTUS).bold()),
-                Span::styled(" Auto-follow at bottom", Style::default().fg(GHOST_WHITE)),
+                Span::styled("W", Style::default().fg(EUCALYPTUS).bold()),
+                Span::styled(" Word Wrap  ", Style::default().fg(GHOST_WHITE)),
+                Span::styled("Ctrl+A", Style::default().fg(EUCALYPTUS).bold()),
+                Span::styled(" Select All", Style::default().fg(GHOST_WHITE)),
+                Span::styled(&selection_count, Style::default().fg(LIGHT_PERIWINKLE)),
             ]),
         ])
         .alignment(Alignment::Center)
@@ -397,11 +779,26 @@ impl Component for NodeLogsPopup {
 
         f.render_widget(instructions, main_layout[2]);
 
-        // Draw tail following indicator
+        // Draw tail following and word wrap indicators
+        let mut indicators = Vec::new();
         if self.is_following_tail {
-            let indicator_area = Rect::new(popup_area.right() - 12, popup_area.y + 1, 11, 1);
+            indicators.push(" [TAIL] ");
+        }
+        if self.word_wrap_enabled {
+            indicators.push(" [WRAP] ");
+        }
+
+        if !indicators.is_empty() {
+            let indicator_text = indicators.join("");
+            let indicator_width = indicator_text.len() as u16;
+            let indicator_area = Rect::new(
+                popup_area.right().saturating_sub(indicator_width + 1),
+                popup_area.y + 1,
+                indicator_width,
+                1,
+            );
             let indicator =
-                Paragraph::new(" [TAIL] ").style(Style::default().fg(EUCALYPTUS).bold());
+                Paragraph::new(indicator_text).style(Style::default().fg(EUCALYPTUS).bold());
             f.render_widget(indicator, indicator_area);
         }
 
@@ -490,30 +887,30 @@ mod tests {
         assert_eq!(popup.list_state.selected(), Some(9));
 
         // Scrolling up should disable tail mode
-        popup.handle_scroll_up();
+        popup.handle_scroll_up(false);
         assert!(!popup.is_following_tail);
         assert_eq!(popup.list_state.selected(), Some(8));
 
         // Scrolling down to the end should re-enable tail mode
-        popup.handle_scroll_down();
+        popup.handle_scroll_down(false);
         assert!(popup.is_following_tail);
         assert_eq!(popup.list_state.selected(), Some(9));
 
         // Page up should disable tail mode
-        popup.handle_page_up();
+        popup.handle_page_up(false);
         assert!(!popup.is_following_tail);
 
         // Page down to the end should re-enable tail mode
-        popup.handle_page_down();
+        popup.handle_page_down(false);
         assert!(popup.is_following_tail);
 
         // Home should disable tail mode
-        popup.handle_home();
+        popup.handle_home(false);
         assert!(!popup.is_following_tail);
         assert_eq!(popup.list_state.selected(), Some(0));
 
         // End should re-enable tail mode
-        popup.handle_end();
+        popup.handle_end(false);
         assert!(popup.is_following_tail);
         assert_eq!(popup.list_state.selected(), Some(9));
     }
@@ -569,7 +966,7 @@ mod tests {
         ]);
 
         // Disable tail following by scrolling up
-        popup.handle_scroll_up();
+        popup.handle_scroll_up(false);
         assert!(!popup.is_following_tail);
         let selected_before = popup.list_state.selected();
 
@@ -651,14 +1048,14 @@ mod tests {
         popup.set_logs(test_logs);
 
         // Scroll to different positions and verify list state is updated
-        popup.handle_home();
+        popup.handle_home(false);
         assert_eq!(popup.list_state.selected(), Some(0));
 
-        popup.handle_page_down();
+        popup.handle_page_down(false);
         let selected = popup.list_state.selected().unwrap();
         assert!(selected > 0); // Should have moved from position 0
 
-        popup.handle_end();
+        popup.handle_end(false);
         assert_eq!(popup.list_state.selected(), Some(19));
     }
 
@@ -668,22 +1065,22 @@ mod tests {
         popup.set_logs(vec![]);
 
         // All navigation should be safe with empty logs
-        popup.handle_scroll_up();
+        popup.handle_scroll_up(false);
         assert_eq!(popup.list_state.selected(), None);
 
-        popup.handle_scroll_down();
+        popup.handle_scroll_down(false);
         assert_eq!(popup.list_state.selected(), None);
 
-        popup.handle_page_up();
+        popup.handle_page_up(false);
         assert_eq!(popup.list_state.selected(), None);
 
-        popup.handle_page_down();
+        popup.handle_page_down(false);
         assert_eq!(popup.list_state.selected(), None);
 
-        popup.handle_home();
+        popup.handle_home(false);
         assert_eq!(popup.list_state.selected(), None);
 
-        popup.handle_end();
+        popup.handle_end(false);
         assert_eq!(popup.list_state.selected(), None);
     }
 
@@ -696,16 +1093,16 @@ mod tests {
         assert_eq!(popup.list_state.selected(), Some(0));
 
         // All navigation should keep selection at the single item
-        popup.handle_scroll_up();
+        popup.handle_scroll_up(false);
         assert_eq!(popup.list_state.selected(), Some(0));
 
-        popup.handle_scroll_down();
+        popup.handle_scroll_down(false);
         assert_eq!(popup.list_state.selected(), Some(0));
 
-        popup.handle_page_up();
+        popup.handle_page_up(false);
         assert_eq!(popup.list_state.selected(), Some(0));
 
-        popup.handle_page_down();
+        popup.handle_page_down(false);
         assert_eq!(popup.list_state.selected(), Some(0));
     }
 
@@ -719,18 +1116,18 @@ mod tests {
         assert_eq!(popup.list_state.selected(), Some(49));
 
         // Page up should move up by 10
-        popup.handle_page_up();
+        popup.handle_page_up(false);
         assert_eq!(popup.list_state.selected(), Some(39));
         assert!(!popup.is_following_tail);
 
         // Page down should move down by 10
-        popup.handle_page_down();
+        popup.handle_page_down(false);
         assert_eq!(popup.list_state.selected(), Some(49));
         assert!(popup.is_following_tail); // Should re-enable tail at bottom
 
         // From top, page up should stay at 0
-        popup.handle_home();
-        popup.handle_page_up();
+        popup.handle_home(false);
+        popup.handle_page_up(false);
         assert_eq!(popup.list_state.selected(), Some(0));
     }
 
@@ -806,11 +1203,11 @@ mod tests {
         assert!(popup.is_following_tail);
 
         // Scroll up should disable tail following
-        popup.handle_scroll_up();
+        popup.handle_scroll_up(false);
         assert!(!popup.is_following_tail);
 
         // Back to bottom should re-enable
-        popup.handle_end();
+        popup.handle_end(false);
         assert!(popup.is_following_tail);
     }
 
@@ -824,6 +1221,86 @@ mod tests {
         assert_eq!(popup1.focus_target(), FocusTarget::NodeLogsPopup);
         assert_eq!(popup2.focus_target(), FocusTarget::NodeLogsPopup);
         assert_eq!(popup3.focus_target(), FocusTarget::NodeLogsPopup);
+    }
+
+    #[test]
+    fn test_selection_functionality() {
+        let mut popup = NodeLogsPopup::new("test_node".to_string());
+        let test_logs: Vec<String> = (0..10).map(|i| format!("Log line {i}")).collect();
+        popup.set_logs(test_logs);
+
+        // Test selection with shift+down
+        popup.list_state.select(Some(2));
+        popup.handle_scroll_down(true);
+        assert!(popup.is_selecting);
+        assert_eq!(popup.selection_start, Some(2));
+        assert_eq!(popup.selection_end, Some(3));
+        assert!(popup.is_line_selected(2));
+        assert!(popup.is_line_selected(3));
+        assert!(!popup.is_line_selected(1));
+
+        // Test extending selection
+        popup.handle_scroll_down(true);
+        assert_eq!(popup.selection_start, Some(2));
+        assert_eq!(popup.selection_end, Some(4));
+        assert!(popup.is_line_selected(4));
+
+        // Test clearing selection on normal navigation
+        popup.handle_scroll_down(false);
+        assert!(!popup.is_selecting);
+        assert_eq!(popup.selection_start, None);
+        assert_eq!(popup.selection_end, None);
+    }
+
+    #[test]
+    fn test_select_all_functionality() {
+        let mut popup = NodeLogsPopup::new("test_node".to_string());
+        let test_logs: Vec<String> = (0..5).map(|i| format!("Line {i}")).collect();
+        popup.set_logs(test_logs);
+
+        popup.select_all();
+        assert!(popup.is_selecting);
+        assert_eq!(popup.selection_start, Some(0));
+        assert_eq!(popup.selection_end, Some(4));
+
+        // Check all lines are selected
+        for i in 0..5 {
+            assert!(popup.is_line_selected(i));
+        }
+    }
+
+    #[test]
+    fn test_get_selected_text() {
+        let mut popup = NodeLogsPopup::new("test_node".to_string());
+        let test_logs = vec![
+            "First line".to_string(),
+            "Second line".to_string(),
+            "Third line".to_string(),
+        ];
+        popup.set_logs(test_logs);
+
+        // Test getting single line when no selection
+        popup.list_state.select(Some(1));
+        let text = popup.get_selected_text();
+        assert_eq!(text, "Second line");
+
+        // Test getting multiple selected lines
+        popup.selection_start = Some(0);
+        popup.selection_end = Some(2);
+        let text = popup.get_selected_text();
+        assert_eq!(text, "First line\nSecond line\nThird line");
+    }
+
+    #[test]
+    fn test_word_wrap_toggle() {
+        let mut popup = NodeLogsPopup::new("test_node".to_string());
+        assert!(!popup.word_wrap_enabled);
+
+        popup.toggle_word_wrap();
+        assert!(popup.word_wrap_enabled);
+
+        popup.toggle_word_wrap();
+        assert!(!popup.word_wrap_enabled);
     }
 
     #[test]
@@ -842,7 +1319,7 @@ mod tests {
 
         // Should still function normally with special characters
         assert_eq!(popup.list_state.selected(), Some(4));
-        popup.handle_home();
+        popup.handle_home(false);
         assert_eq!(popup.list_state.selected(), Some(0));
     }
 }
