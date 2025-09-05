@@ -43,7 +43,6 @@ use ant_node::utils::get_root_dir_and_keypair;
 use ant_protocol::version;
 use clap::Parser;
 use clap::command;
-use color_eyre::Result;
 use const_hex::traits::FromHex;
 use libp2p::PeerId;
 use libp2p::identity::Keypair;
@@ -77,7 +76,7 @@ impl std::fmt::Display for LogOutputDestArg {
     }
 }
 
-pub fn parse_log_output(val: &str) -> Result<LogOutputDestArg> {
+pub fn parse_log_output(val: &str) -> eyre::Result<LogOutputDestArg> {
     match val {
         "stdout" => Ok(LogOutputDestArg::Stdout),
         "data-dir" => Ok(LogOutputDestArg::DataDir),
@@ -87,7 +86,7 @@ pub fn parse_log_output(val: &str) -> Result<LogOutputDestArg> {
     }
 }
 
-pub fn parse_rewards_address(val: &str) -> Result<RewardsAddress> {
+pub fn parse_rewards_address(val: &str) -> eyre::Result<RewardsAddress> {
     let val = RewardsAddress::from_hex(val)?;
     Ok(val)
 }
@@ -328,17 +327,24 @@ fn main() {
     );
 
     let node_socket_addr = SocketAddr::new(opt.ip, opt.port);
-    let Ok((root_dir, keypair)) = get_root_dir_and_keypair(&opt.root_dir) else {
-        eprintln!("Failed to obtain or create the node's root directory and keypair.");
-        return;
+    let (root_dir, keypair) = match get_root_dir_and_keypair(&opt.root_dir) {
+        Ok((root_dir, keypair)) => (root_dir, keypair),
+        Err(err) => {
+            eprintln!("Failed to obtain or create the node's root directory and keypair: {err}");
+            return;
+        }
     };
 
-    let Ok((log_output_dest, log_reload_handle, _log_appender_guard)) =
-        init_logging(&opt, keypair.public().to_peer_id())
-    else {
-        eprintln!("Failed to initialize logging.");
-        return;
-    };
+    let (log_output_dest, log_reload_handle, _log_appender_guard) =
+        match init_logging(&opt, keypair.public().to_peer_id()) {
+            Ok((log_output_dest, log_reload_handle, _log_appender_guard)) => {
+                (log_output_dest, log_reload_handle, _log_appender_guard)
+            }
+            Err(err) => {
+                eprintln!("Failed to initialize logging: {err}");
+                return;
+            }
+        };
 
     if let Err(err) = run(
         &opt,
@@ -353,13 +359,14 @@ fn main() {
         error!("Node failed with error: {err}");
         eprintln!("Node failed with error: {err}");
 
-        set_critical_failure(&log_output_dest, &format!("{err:?}"));
+        set_critical_failure(&log_output_dest, &err);
 
         std::process::exit(1);
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::result_large_err)]
 fn run(
     opt: &Opt,
     log_output_dest: &str,
@@ -369,11 +376,14 @@ fn run(
     evm_network: EvmNetwork,
     node_socket_addr: SocketAddr,
     root_dir: PathBuf,
-) -> Result<()> {
+) -> Result<(), ant_node::Error> {
     // Create a tokio runtime per `run_node` attempt, this ensures
     // any spawned tasks are closed before we would attempt to run
     // another process with these args.
-    let rt = Runtime::new()?;
+    let rt = Runtime::new().map_err(|err| {
+        error!("Failed to create Tokio runtime: {err}");
+        ant_node::Error::Tokio
+    })?;
 
     let mut bootstrap_config = BootstrapCacheConfig::try_from(&opt.peers)?;
     bootstrap_config.backwards_compatible_writes = opt.write_older_cache_files;
@@ -633,7 +643,10 @@ fn monitor_node_events(mut node_events_rx: NodeEventsReceiver, ctrl_tx: mpsc::Se
     });
 }
 
-fn init_logging(opt: &Opt, peer_id: PeerId) -> Result<(String, ReloadHandle, Option<WorkerGuard>)> {
+fn init_logging(
+    opt: &Opt,
+    peer_id: PeerId,
+) -> eyre::Result<(String, ReloadHandle, Option<WorkerGuard>)> {
     let logging_targets = vec![
         ("ant_bootstrap".to_string(), Level::INFO),
         ("ant_build_info".to_string(), Level::DEBUG),

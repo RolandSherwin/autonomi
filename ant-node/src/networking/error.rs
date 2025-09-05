@@ -6,13 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use ant_protocol::NetworkAddress;
 use ant_protocol::messages::Response;
-use ant_protocol::storage::GraphEntryAddress;
-use ant_protocol::storage::RecordKind;
 use libp2p::TransportError;
+use libp2p::kad;
 use libp2p::kad::QueryId;
-use libp2p::kad::{self};
 use libp2p::request_response::OutboundFailure;
 use libp2p::request_response::OutboundRequestId;
 use libp2p::swarm::DialError;
@@ -60,34 +57,10 @@ pub enum NetworkError {
     ListenFailed(libp2p::core::multiaddr::Multiaddr),
 
     // ---------- Record Errors
-    #[error("Record not stored by nodes, it could be invalid, else you should retry: {0:?}")]
-    RecordNotStoredByNodes(NetworkAddress),
-
-    // The RecordKind that was obtained did not match with the expected one
-    #[error("The RecordKind obtained from the Record did not match with the expected kind: {0}")]
-    RecordKindMismatch(RecordKind),
-
     #[error("Record header is incorrect")]
     InCorrectRecordHeader,
 
-    #[error("The operation is not allowed on a client record store")]
-    OperationNotAllowedOnClientRecordStore,
-
-    // ---------- Chunk Errors
-    #[error("Failed to verify the ChunkProof with the provided quorum")]
-    FailedToVerifyChunkProof(NetworkAddress),
-
-    // ---------- Graph Errors
-    #[error("Graph entry not found: {0:?}")]
-    NoGraphEntryFoundInsideRecord(GraphEntryAddress),
-
     // ---------- Store Error
-    #[error("Not Enough Peers for Store Cost Request")]
-    NotEnoughPeersForStoreCostRequest,
-
-    #[error("No Store Cost Responses")]
-    NoStoreCostResponses,
-
     #[error("Could not create storage dir: {path:?}, error: {source}")]
     FailedToCreateRecordStoreDir {
         path: PathBuf,
@@ -124,9 +97,6 @@ pub enum NetworkError {
 
     #[error("Outgoing response has been dropped due to a conn being closed or timeout: {0}")]
     OutgoingResponseDropped(Response),
-
-    #[error("Error setting up behaviour: {0}")]
-    BehaviourErr(String),
 }
 
 /// Return a list of error strings for the DialError type

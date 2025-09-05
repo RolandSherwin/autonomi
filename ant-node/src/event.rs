@@ -6,9 +6,6 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::error::Error;
-use crate::error::Result;
-
 use ant_evm::AttoTokens;
 use ant_protocol::NetworkAddress;
 use ant_protocol::storage::ChunkAddress;
@@ -74,18 +71,6 @@ pub enum NodeEvent {
 pub enum TerminateNodeReason {
     HardDiskWriteError,
     UpnpGatewayNotFound,
-}
-
-impl NodeEvent {
-    /// Convert NodeEvent to bytes
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        rmp_serde::to_vec(&self).map_err(|_| Error::NodeEventParsingFailed)
-    }
-
-    /// Get NodeEvent from bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        rmp_serde::from_slice(bytes).map_err(|_| Error::NodeEventParsingFailed)
-    }
 }
 
 impl std::fmt::Display for TerminateNodeReason {

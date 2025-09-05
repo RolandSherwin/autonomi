@@ -26,7 +26,6 @@ mod replication_fetcher;
 mod transport;
 
 // re-export arch dependent deps for use in the crate, or above
-pub(crate) use self::error::NetworkError;
 pub(crate) use self::interface::NetworkEvent;
 pub(crate) use self::interface::NodeIssue;
 pub use self::interface::SwarmLocalState;
@@ -36,6 +35,7 @@ pub(crate) use self::network::init_reachability_check_swarm;
 pub use self::reachability_check::ReachabilityIssue;
 pub use self::reachability_check::ReachabilityStatus;
 pub(crate) use self::record_store::NodeRecordStore;
+pub use error::NetworkError;
 
 #[cfg(feature = "open-metrics")]
 pub(crate) use metrics::service::MetricsRegistries;
