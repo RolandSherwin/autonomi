@@ -219,9 +219,7 @@ impl NetworkDriver {
                     return Ok(());
                 };
                 if is_a_relayed_peer(info.listen_addrs.iter()) {
-                    debug!(
-                        "identify: peer {peer_id:?} is a relayed peer, skipping adding to cache."
-                    );
+                    debug!("identify: peer {peer_id:?} is a relayed peer, skipping adding to RT.");
                     return Ok(());
                 }
 
