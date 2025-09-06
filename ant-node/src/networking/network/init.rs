@@ -46,11 +46,9 @@ use ant_protocol::version::IDENTIFY_PROTOCOL_STR;
 use ant_protocol::version::IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR;
 use ant_protocol::version::REQ_RESPONSE_VERSION_STR;
 use ant_protocol::version::get_network_id_str;
-use futures::future::Either;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::Transport as _;
-use libp2p::core::muxing::StreamMuxerBox;
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad;
@@ -434,25 +432,7 @@ pub(crate) async fn init_reachability_check_swarm(
     #[cfg(feature = "open-metrics")]
     let transport = transport::build_transport(&config.keypair, &mut metrics_registries);
     #[cfg(not(feature = "open-metrics"))]
-    let transport = transport::build_transport(&self.keypair);
-
-    let (relay_transport, _relay_client) =
-        libp2p::relay::client::new(config.keypair.public().to_peer_id());
-    let transport = relay_transport
-        .upgrade(libp2p::core::upgrade::Version::V1Lazy)
-        .authenticate(
-            libp2p::noise::Config::new(&config.keypair)
-                .expect("Signing libp2p-noise static DH keypair failed."),
-        )
-        .multiplex(libp2p::yamux::Config::default())
-        .or_transport(transport);
-
-    let transport = transport
-        .map(|either_output, _| match either_output {
-            Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-            Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
-        })
-        .boxed();
+    let transport = transport::build_transport(&config.keypair);
 
     #[cfg(feature = "open-metrics")]
     let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
