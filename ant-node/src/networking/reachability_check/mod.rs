@@ -143,9 +143,10 @@ impl ReachabilityCheckSwarmDriver {
         let mut swarm = swarm;
 
         println!("Obtaining valid listeners for the reachability check workflow..");
-        let (observed_listeners, upnp_supported) =
-            get_all_listeners(keypair, local, listen_addr, no_upnp).await?;
+        // let (observed_listeners, upnp_supported) =
+        //     get_all_listeners(keypair, local, listen_addr, no_upnp).await?;
 
+        let observed_listeners = vec![listen_addr];
         if observed_listeners.is_empty() {
             error!("No listen addresses found. Cannot start reachability check.");
             println!("No valid listeners found. Exiting.");
@@ -172,7 +173,7 @@ impl ReachabilityCheckSwarmDriver {
         Ok(Self {
             swarm,
             dial_manager: DialManager::new(initial_contacts),
-            upnp_supported,
+            upnp_supported: false,
             progress_calculator: ProgressCalculator::new(),
             #[cfg(feature = "open-metrics")]
             metrics_recorder,
