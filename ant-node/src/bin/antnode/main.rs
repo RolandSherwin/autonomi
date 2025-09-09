@@ -13,12 +13,12 @@
 #[macro_use]
 extern crate tracing;
 
-mod log;
+mod criticial_failure;
 mod rpc_service;
 mod subcommands;
 
-use crate::log::reset_critical_failure;
-use crate::log::set_critical_failure;
+use crate::criticial_failure::reset_critical_failure;
+use crate::criticial_failure::set_critical_failure;
 use crate::rpc_service::NodeCtrl;
 use crate::rpc_service::StopResult;
 use crate::subcommands::EvmNetworkCommand;
