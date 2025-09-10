@@ -21,7 +21,6 @@ use futures::StreamExt;
 use libp2p::Multiaddr;
 use libp2p::Swarm;
 use libp2p::core::ConnectedPoint;
-use libp2p::core::transport::ListenerId;
 use libp2p::identify;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Protocol;
@@ -39,8 +38,7 @@ use std::time::Instant;
 
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
-use crate::networking::network::listen_on_with_retry;
-use crate::networking::reachability_check::listener::get_all_listeners;
+use crate::networking::reachability_check::listener::ListenerManager;
 
 /// The maximum number of peers to dial concurrently during the reachability check.
 pub(crate) const MAX_CONCURRENT_DIALS: usize = 7;
@@ -69,7 +67,7 @@ pub enum ReachabilityStatus {
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum ReachabilityIssue {
-    #[error("We were not able to make any outbound connections. Exiting.")]
+    #[error("We were not able to make any outbound connections. Attempt cannot be retried.")]
     NoOutboundConnection,
     #[error("We were not able to get any dial backs from other peers. Retrying if possible.")]
     NoDialBacks,
@@ -85,11 +83,11 @@ pub enum ReachabilityIssue {
         "We found multiple valid local adapter addresses. Make sure that you call run the node again with a single address via the '--ip <ip_address>' flag."
     )]
     MultipleLocalAdapterAddresses,
-    #[error("We found an unspecified external address. Exiting.")]
+    #[error("We found an unspecified external address. Attempt cannot be retried.")]
     UnspecifiedExternalAddress,
-    #[error("We found an unspecified local adapter address. Exiting.")]
+    #[error("We found an unspecified local adapter address. Attempt cannot be retried.")]
     UnspecifiedLocalAdapterAddress,
-    #[error("We found a local adapter port that is zero. Exiting.")]
+    #[error("We found a local adapter port that is zero. Attempt cannot be retried.")]
     LocalAdapterPortZero,
 }
 
@@ -129,11 +127,8 @@ pub(crate) struct ReachabilityCheckSwarmDriver {
     pub(crate) swarm: Swarm<ReachabilityCheckBehaviour>,
     pub(crate) upnp_supported: bool,
     pub(crate) dial_manager: DialManager,
+    pub(crate) listener_manager: ListenerManager,
     pub(crate) progress_calculator: ProgressCalculator,
-    pub(crate) available_listeners: Vec<SocketAddr>,
-    pub(crate) current_listener_index: usize,
-    pub(crate) current_listener_id: Option<ListenerId>,
-    pub(crate) listener_failures: HashMap<SocketAddr, ReachabilityIssue>,
     #[cfg(feature = "open-metrics")]
     pub(crate) metrics_recorder: Option<NetworkMetricsRecorder>,
 }
@@ -155,84 +150,27 @@ impl ReachabilityCheckSwarmDriver {
         let swarm = swarm;
 
         println!("Obtaining valid listeners for the reachability check workflow..");
-        let (observed_listeners, upnp_supported) =
-            get_all_listeners(keypair, local, listen_addr, no_upnp).await?;
 
-        if observed_listeners.is_empty() {
-            error!("No listen addresses found. Cannot start reachability check.");
-            println!("No valid listeners found. Exiting.");
-            return Err(NetworkError::NoListenAddressesFound);
-        }
-
-        let available_listeners: Vec<SocketAddr> = observed_listeners.into_iter().collect();
-        info!(
-            "Found {} valid listeners for reachability check: {:?}",
-            available_listeners.len(),
-            available_listeners
-        );
+        let (listener_manager, upnp_supported) =
+            ListenerManager::new(keypair, local, listen_addr, no_upnp).await?;
 
         Ok(Self {
             swarm,
             dial_manager: DialManager::new(initial_contacts),
             upnp_supported,
             progress_calculator: ProgressCalculator::new(),
-            available_listeners,
-            current_listener_index: 0,
-            current_listener_id: None,
-            listener_failures: HashMap::new(),
+            listener_manager,
             #[cfg(feature = "open-metrics")]
             metrics_recorder,
         })
     }
 
-    /// Bind to the next available listener. Returns Ok if successful, Err if no more listeners.
-    fn bind_next_listener(&mut self) -> Result<(), NetworkError> {
-        // Remove current listener if one exists
-        if let Some(listener_id) = self.current_listener_id.take() {
-            if !self.swarm.remove_listener(listener_id) {
-                error!("CRITICAL: Failed to remove listener {listener_id:?}");
-                return Err(NetworkError::ListenerCleanupFailed);
-            }
-            info!("Successfully removed previous listener {listener_id:?}");
-        }
-
-        // Check if we have more listeners to try
-        if self.current_listener_index >= self.available_listeners.len() {
-            error!("No more listeners available to try");
-            return Err(NetworkError::NoListenAddressesFound);
-        }
-
-        let listener_addr = self.available_listeners[self.current_listener_index];
-        let addr_quic = Multiaddr::from(listener_addr.ip())
-            .with(Protocol::Udp(listener_addr.port()))
-            .with(Protocol::QuicV1);
-
-        info!(
-            "Attempting to bind to listener {} of {}: {addr_quic:?}",
-            self.current_listener_index + 1,
-            self.available_listeners.len()
-        );
-        println!(
-            "Trying listener {} of {}: {addr_quic:?}",
-            self.current_listener_index + 1,
-            self.available_listeners.len()
-        );
-
-        let listener_id = listen_on_with_retry(&mut self.swarm, addr_quic.clone())?;
-        self.current_listener_id = Some(listener_id);
-
-        info!("Successfully bound to {addr_quic:?} with {listener_id:?}");
-        println!("Successfully bound to {addr_quic:?}");
-
-        Ok(())
-    }
-
     /// Move to the next listener and reset the workflow state
     fn try_next_listener(&mut self) -> Result<(), NetworkError> {
-        self.current_listener_index += 1;
+        self.listener_manager.increment_listener_index();
 
-        // Bind to the next listener
-        self.bind_next_listener()?;
+        // Bind to the new listener index
+        self.listener_manager.bind_listener(&mut self.swarm)?;
 
         self.dial_manager.reset_workflow_for_new_listener();
 
@@ -244,18 +182,18 @@ impl ReachabilityCheckSwarmDriver {
         println!("Starting reachability check workflow. This could take 3 to 10 minutes..");
 
         // Bind to the first listener
-        self.bind_next_listener()?;
+        self.listener_manager.bind_listener(&mut self.swarm)?;
 
         info!(
             "Starting reachability check workflow. Listener {} of {}, Attempt {} of {MAX_WORKFLOW_ATTEMPTS}",
-            self.current_listener_index + 1,
-            self.available_listeners.len(),
+            self.listener_manager.current_listener_index() + 1,
+            self.listener_manager.total_listeners(),
             self.dial_manager.current_workflow_attempt
         );
         println!(
             "\nReachability Workflow Summary - Listener {} of {}, Attempt {} of {MAX_WORKFLOW_ATTEMPTS}",
-            self.current_listener_index + 1,
-            self.available_listeners.len(),
+            self.listener_manager.current_listener_index() + 1,
+            self.listener_manager.total_listeners(),
             self.dial_manager.current_workflow_attempt
         );
         let mut dial_check_interval = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -603,14 +541,14 @@ impl ReachabilityCheckSwarmDriver {
                     // Try another workflow attempt with the same listener
                     info!(
                         "Retrying reachability check workflow (failed due to: {reason:?}). Listener {} of {}, Attempt {} of {MAX_WORKFLOW_ATTEMPTS}",
-                        self.current_listener_index + 1,
-                        self.available_listeners.len(),
+                        self.listener_manager.current_listener_index() + 1,
+                        self.listener_manager.total_listeners(),
                         self.dial_manager.current_workflow_attempt + 1
                     );
                     println!(
                         "\nReachability Workflow Summary - Listener {} of {}, Attempt {} of {MAX_WORKFLOW_ATTEMPTS}",
-                        self.current_listener_index + 1,
-                        self.available_listeners.len(),
+                        self.listener_manager.current_listener_index() + 1,
+                        self.listener_manager.total_listeners(),
                         self.dial_manager.current_workflow_attempt + 1
                     );
                     self.dial_manager.increment_workflow();
@@ -619,20 +557,16 @@ impl ReachabilityCheckSwarmDriver {
                 }
 
                 // All workflow attempts exhausted for this listener, record the failure and try next listener
-                let current_listener_addr = self.available_listeners[self.current_listener_index];
-                let _ = self
-                    .listener_failures
-                    .insert(current_listener_addr, reason.clone());
+                self.listener_manager.record_failure(reason.clone());
 
-                if self.has_more_listeners() {
+                if self.listener_manager.has_more_listeners() {
                     info!(
                         "Max workflow attempts reached for listener {}. Trying next listener.",
-                        self.current_listener_index + 1
+                        self.listener_manager.current_listener_index() + 1
                     );
                     println!(
-                        "Listener {} failed after {} attempts. Trying next listener...",
-                        self.current_listener_index + 1,
-                        MAX_WORKFLOW_ATTEMPTS
+                        "Listener {} failed after MAX attempts. Trying next listener...",
+                        self.listener_manager.current_listener_index() + 1,
                     );
 
                     // Try to bind to the next listener
@@ -640,8 +574,8 @@ impl ReachabilityCheckSwarmDriver {
                         Ok(()) => {
                             println!(
                                 "\nReachability Workflow Summary - Listener {} of {}, Attempt {} of {MAX_WORKFLOW_ATTEMPTS}",
-                                self.current_listener_index + 1,
-                                self.available_listeners.len(),
+                                self.listener_manager.current_listener_index() + 1,
+                                self.listener_manager.total_listeners(),
                                 self.dial_manager.current_workflow_attempt
                             );
                             self.trigger_dial();
@@ -651,7 +585,7 @@ impl ReachabilityCheckSwarmDriver {
                             error!("Failed to bind to next listener: {err:?}");
                             return Some(ReachabilityStatus::NotReachable {
                                 upnp: self.upnp_supported,
-                                reason: self.listener_failures.clone(),
+                                reason: self.listener_manager.listener_failures().clone(),
                             });
                         }
                     }
@@ -663,11 +597,12 @@ impl ReachabilityCheckSwarmDriver {
                 println!("We are not reachable. Terminating the reachability check workflow.\n");
                 error!(
                     "Reachability status: NotReachable with UPnP status: {} due to failures: {:?}",
-                    self.upnp_supported, self.listener_failures
+                    self.upnp_supported,
+                    self.listener_manager.listener_failures()
                 );
                 Some(ReachabilityStatus::NotReachable {
                     upnp: self.upnp_supported,
-                    reason: self.listener_failures.clone(),
+                    reason: self.listener_manager.listener_failures().clone(),
                 })
             }
         }
@@ -794,13 +729,9 @@ impl ReachabilityCheckSwarmDriver {
         self.dial_manager.current_workflow_attempt < MAX_WORKFLOW_ATTEMPTS
     }
 
-    fn has_more_listeners(&self) -> bool {
-        self.current_listener_index + 1 < self.available_listeners.len()
-    }
-
     fn workflow_progress(&self) -> f64 {
-        let total_listeners = self.available_listeners.len() as f64;
-        let current_listener = self.current_listener_index as f64;
+        let total_listeners = self.listener_manager.total_listeners() as f64;
+        let current_listener = self.listener_manager.current_listener_index() as f64;
         let listener_progress = current_listener / total_listeners;
 
         let workflow_progress = self
