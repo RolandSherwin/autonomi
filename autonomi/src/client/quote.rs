@@ -25,6 +25,7 @@ use xor_name::XorName;
 const GET_MARKET_PRICE_BATCH_LIMIT: usize = 2000;
 
 /// A quote for a single address
+#[derive(Debug, Clone)]
 pub struct QuoteForAddress(pub(crate) Vec<(PeerId, Addresses, PaymentQuote, Amount)>);
 
 impl QuoteForAddress {
@@ -34,6 +35,7 @@ impl QuoteForAddress {
 }
 
 /// A quote for many addresses
+#[derive(Debug, Clone)]
 pub struct StoreQuote(pub HashMap<XorName, QuoteForAddress>);
 
 impl StoreQuote {

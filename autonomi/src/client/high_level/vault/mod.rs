@@ -37,15 +37,15 @@ use tracing::info;
 pub type VaultContentType = u64;
 
 /// Defines the max size of content can be written into per ScratchPad
-const MAX_CONTENT_PER_SCRATCHPAD: usize = Scratchpad::MAX_SIZE - 1024;
+pub const MAX_CONTENT_PER_SCRATCHPAD: usize = Scratchpad::MAX_SIZE - 1024;
 
 /// Defines the max number of Scratchpads that one GraphEntry can point to
 /// The current value is assuming GraphEntry max_size to be 100KB.
-const NUM_OF_SCRATCHPADS_PER_GRAPHENTRY: usize = 1_000;
+pub const NUM_OF_SCRATCHPADS_PER_GRAPH_ENTRY: usize = 1_000;
 
 /// Hard coded derivation index for the Vault's root GraphEntry.
 /// Derive the Vault's main secret/public key by it to get the root GraphEntry owner/address
-const VAULT_HEAD_DERIVATION_INDEX: [u8; 32] = [0; 32];
+pub const VAULT_HEAD_DERIVATION_INDEX: [u8; 32] = [0; 32];
 
 /// For custom apps using Vault, this function converts an app identifier or name to a [`VaultContentType`]
 pub fn app_name_to_vault_content_type<T: Hash>(s: T) -> VaultContentType {
@@ -147,7 +147,7 @@ impl Client {
 
             let num_of_scratchpads = max_size / MAX_CONTENT_PER_SCRATCHPAD as u64 + 1;
             let num_of_graph_entry =
-                num_of_scratchpads / NUM_OF_SCRATCHPADS_PER_GRAPHENTRY as u64 + 1;
+                num_of_scratchpads / NUM_OF_SCRATCHPADS_PER_GRAPH_ENTRY as u64 + 1;
 
             let total_cost = U256::from(num_of_graph_entry) * graph_entry_cost.as_atto()
                 + U256::from(num_of_scratchpads) * scratchpad_cost.as_atto();
@@ -183,7 +183,7 @@ impl Client {
             )
             .await?;
 
-        let contents = split_bytes(data);
+        let contents = vault_split_bytes(data);
 
         info!(
             "Current capacity is {}, meanwhile requiring {}",
@@ -278,7 +278,7 @@ impl Client {
     //   * cur_free_graphentry_derivation: the output[0] of the tail of the linked GraphEntry
     //   * scratchpad_derivations: ordered by the creating order
     //   * graph_cost: cost paid to upload the GraphEntry
-    async fn expand_capacity(
+    pub async fn expand_capacity(
         &self,
         main_secret_key: &MainSecretKey,
         cur_graphentry_derivation: &DerivationIndex,
@@ -300,7 +300,7 @@ impl Client {
         let mut descendants = vec![(public_key, new_graphentry_derivation.into_bytes())];
 
         // Pointing to other future Scrachpads
-        descendants.extend((0..NUM_OF_SCRATCHPADS_PER_GRAPHENTRY).map(|_| {
+        descendants.extend((0..NUM_OF_SCRATCHPADS_PER_GRAPH_ENTRY).map(|_| {
             let derivation_index = DerivationIndex::random(&mut rand::thread_rng());
             let public_key: PublicKey = main_secret_key
                 .derive_key(&derivation_index)
@@ -332,7 +332,7 @@ impl Client {
     //   * cur_free_graphentry_derivation: i.e. the root if no graph_entry uploaded,
     //       otherwise, the first un-used one (the output[0] of the tail of the linked GraphEntry)
     //   * scratchpad_derivations: ordered by the collection order
-    async fn vault_claimed_capacity(
+    pub async fn vault_claimed_capacity(
         &self,
         main_secret_key: &MainSecretKey,
         mut cur_free_graphentry_derivation: DerivationIndex,
@@ -350,7 +350,7 @@ impl Client {
                     // scratchpad claimed:
                     //   * the first descendant pointing to next GraphEntry.
                     //   * other descendants pointing to Scratchpads for content.
-                    if entry.descendants.len() <= NUM_OF_SCRATCHPADS_PER_GRAPHENTRY {
+                    if entry.descendants.len() <= NUM_OF_SCRATCHPADS_PER_GRAPH_ENTRY {
                         let msg = format!(
                             "Vault's GraphEntry at {cur_graph_entry_addr:?} only has {} descendants.",
                             entry.descendants.len()
@@ -429,7 +429,7 @@ impl Client {
     }
 }
 
-fn split_bytes(input: Bytes) -> Vec<Bytes> {
+pub fn vault_split_bytes(input: Bytes) -> Vec<Bytes> {
     let mut contents = Vec::new();
     let mut offset = 0;
 
