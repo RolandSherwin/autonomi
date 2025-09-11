@@ -39,7 +39,7 @@ use crate::{
     GraphEntry, GraphEntryAddress, InitialPeersConfig, MaxFeePerGas, Network as EVMNetwork,
     Pointer, PointerAddress, Scratchpad, ScratchpadAddress, Signature, TransactionConfig, Wallet,
     client::{
-        ClientEvent, GetError, UploadSummary,
+        ClientEvent, UploadSummary,
         chunk::DataMapChunk,
         data::DataAddress,
         files::{archive_private::PrivateArchiveDataMap, archive_public::ArchiveAddress},
@@ -3611,13 +3611,13 @@ impl PyDataMapChunk {
 /// Python iterator wrapper for data streaming
 #[pyclass(name = "DataStream")]
 pub struct PyDataStream {
-    inner: Mutex<Box<dyn Iterator<Item = Result<Bytes, GetError>> + Send>>,
+    inner: Mutex<crate::client::data::DataStream>,
 }
 
 impl PyDataStream {
-    fn new(stream: impl Iterator<Item = Result<Bytes, GetError>> + Send + 'static) -> Self {
+    fn new(stream: crate::client::data::DataStream) -> Self {
         Self {
-            inner: Mutex::new(Box::new(stream)),
+            inner: Mutex::new(stream),
         }
     }
 }
@@ -3640,6 +3640,123 @@ impl PyDataStream {
             Some(Err(e)) => Err(PyRuntimeError::new_err(format!("Stream error: {e}"))),
             None => Ok(None),
         }
+    }
+
+    /// Returns the original data size
+    fn data_size(&self) -> PyResult<usize> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        Ok(stream.data_size())
+    }
+
+    /// Decrypts and returns a specific byte range from the encrypted data.
+    ///
+    /// Args:
+    ///     start: The starting byte position (inclusive)
+    ///     len: The number of bytes to read
+    ///
+    /// Returns:
+    ///     List of bytes containing the decrypted range data
+    fn get_range(&self, start: usize, len: usize) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .get_range(start, len)
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience method to get a range using start and end positions.
+    ///
+    /// Args:
+    ///     start: The starting byte position (inclusive)
+    ///     end: The ending byte position (exclusive)
+    ///
+    /// Returns:
+    ///     List of bytes containing the decrypted range data
+    fn range(&self, start: usize, end: usize) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .range(start..end)
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience method to get a range from a starting position to the end of the file.
+    ///
+    /// Args:
+    ///     start: The starting byte position (inclusive)
+    ///
+    /// Returns:
+    ///     List of bytes from start position to end of file
+    fn range_from(&self, start: usize) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .range_from(start)
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience method to get a range from the beginning of the file to an end position.
+    ///
+    /// Args:
+    ///     end: The ending byte position (exclusive)
+    ///
+    /// Returns:
+    ///     List of bytes from beginning of file to end position
+    fn range_to(&self, end: usize) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .range_to(end)
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience method to get the entire file content.
+    ///
+    /// Returns:
+    ///     List of bytes containing the entire file content
+    fn range_all(&self) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .range_full()
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Convenience method to get an inclusive range.
+    ///
+    /// Args:
+    ///     start: The starting byte position (inclusive)
+    ///     end: The ending byte position (inclusive)
+    ///
+    /// Returns:
+    ///     List of bytes containing the decrypted inclusive range data
+    fn range_inclusive(&self, start: usize, end: usize) -> PyResult<Vec<u8>> {
+        let stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        let bytes = stream
+            .range_inclusive(start, end)
+            .map_err(|e| PyRuntimeError::new_err(format!("Range access error: {e}")))?;
+        Ok(bytes.to_vec())
     }
 }
 

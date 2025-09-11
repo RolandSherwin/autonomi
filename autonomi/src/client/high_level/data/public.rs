@@ -14,6 +14,7 @@ use crate::client::encryption::EncryptionStream;
 use crate::client::payment::PaymentOption;
 use crate::client::quote::CostError;
 use crate::client::{GetError, PutError};
+use crate::data::DataStream;
 use crate::{
     Client,
     chunk::{ChunkAddress, DataMapChunk},
@@ -53,10 +54,7 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn data_stream_public(
-        &self,
-        addr: &DataAddress,
-    ) -> Result<impl Iterator<Item = Result<Bytes, GetError>> + use<>, GetError> {
+    pub async fn data_stream_public(&self, addr: &DataAddress) -> Result<DataStream, GetError> {
         info!("Starting streaming fetch of public data from Data Address: {addr:?}");
         let datamap_chunk =
             DataMapChunk(self.chunk_get(&ChunkAddress::new(*addr.xorname())).await?);

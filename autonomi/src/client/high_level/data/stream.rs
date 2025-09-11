@@ -47,6 +47,65 @@ impl DataStream {
 
         Ok(Self { streaming_decrypt })
     }
+
+    /// Returns the original data size
+    pub fn data_size(&self) -> usize {
+        self.streaming_decrypt.file_size()
+    }
+
+    /// Decrypts and returns a specific byte range from the encrypted data.
+    ///
+    /// This method provides random access to any portion of the encrypted file
+    /// without requiring sequential iteration through all preceding chunks.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The starting byte position (inclusive)
+    /// * `len` - The number of bytes to read
+    ///
+    /// # Returns
+    ///
+    /// * `Result<Bytes>` - The decrypted range of data or an error if chunks are missing/corrupted
+    pub fn get_range(&self, start: usize, len: usize) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .get_range(start, len)
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
+
+    /// Convenience method to get a range using Range syntax.
+    pub fn range(&self, range: std::ops::Range<usize>) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .range(range)
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
+
+    /// Convenience method to get a range from a starting position to the end of the file.
+    pub fn range_from(&self, start: usize) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .range_from(start)
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
+
+    /// Convenience method to get a range from the beginning of the file to an end position.
+    pub fn range_to(&self, end: usize) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .range_to(end)
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
+
+    /// Convenience method to get the entire file content.
+    pub fn range_full(&self) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .range_full()
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
+
+    /// Convenience method to get an inclusive range.
+    pub fn range_inclusive(&self, start: usize, end: usize) -> Result<Bytes, GetError> {
+        self.streaming_decrypt
+            .range_inclusive(start, end)
+            .map_err(|e| GetError::Decryption(crate::self_encryption::Error::SelfEncryption(e)))
+    }
 }
 
 impl Iterator for DataStream {
@@ -73,7 +132,157 @@ impl Iterator for DataStream {
     }
 }
 
+#[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    #[tokio::test]
+    async fn test_data_stream_range_access() {
+        use std::collections::HashMap;
+
+        // Create test data - large enough to be split into multiple chunks
+        let test_data = crate::Bytes::from(vec![42u8; 100_000]); // 100KB of data
+
+        // Encrypt the data to get a data map and chunks
+        let (data_map_chunk, chunks) = crate::self_encryption::encrypt(test_data.clone())
+            .expect("Failed to encrypt test data");
+
+        // Create a mock storage for chunks
+        let mut chunk_storage = HashMap::new();
+        for chunk in &chunks {
+            let hash = xor_name::XorName::from_content(&chunk.value);
+            chunk_storage.insert(hash, chunk.clone());
+        }
+
+        // Also store the data map chunk itself (needed for recursive data maps)
+        let data_map_hash = xor_name::XorName::from_content(&data_map_chunk.value);
+        chunk_storage.insert(data_map_hash, data_map_chunk.clone());
+
+        let data_map_chunk = crate::chunk::DataMapChunk(data_map_chunk);
+
+        // Restore the data map
+        let restored_data_map: self_encryption::DataMap =
+            rmp_serde::from_slice(&data_map_chunk.0.value).expect("Failed to deserialize data map");
+
+        // Create chunk fetcher function that mimics the DataStream's behavior
+        let chunk_fetcher: ChunkFetcher = Box::new(move |chunk_names: &[(usize, xor_name::XorName)]| -> self_encryption::Result<Vec<(usize, crate::Bytes)>> {
+            let mut results = Vec::new();
+            for (i, hash) in chunk_names {
+                let chunk = chunk_storage.get(hash)
+                    .ok_or_else(|| self_encryption::Error::Generic("Chunk not found".to_string()))?;
+                results.push((*i, chunk.value.clone()));
+            }
+            Ok(results)
+        });
+
+        // Create streaming decrypt directly (same as DataStream would do internally)
+        let streaming_decrypt =
+            self_encryption::streaming_decrypt(&restored_data_map, chunk_fetcher)
+                .expect("Failed to create streaming decrypt");
+
+        // Create DataStream with our mocked streaming_decrypt
+        let data_stream = DataStream { streaming_decrypt };
+
+        // Test data_size method
+        assert_eq!(data_stream.data_size(), test_data.len());
+
+        // Test get_range method
+        let range_data = data_stream.get_range(1000, 5000).unwrap();
+        assert_eq!(range_data.len(), 5000);
+        assert_eq!(range_data.as_ref(), &test_data[1000..6000]);
+
+        // Test range method with Range syntax
+        let range_data2 = data_stream.range(1000..6000).unwrap();
+        assert_eq!(range_data2, range_data);
+
+        // Test range_from method
+        let from_data = data_stream.range_from(95000).unwrap();
+        assert_eq!(from_data.len(), 5000);
+        assert_eq!(from_data.as_ref(), &test_data[95000..]);
+
+        // Test range_to method
+        let to_data = data_stream.range_to(5000).unwrap();
+        assert_eq!(to_data.len(), 5000);
+        assert_eq!(to_data.as_ref(), &test_data[..5000]);
+
+        // Test range_full method
+        let full_data = data_stream.range_full().unwrap();
+        assert_eq!(full_data.len(), test_data.len());
+        assert_eq!(full_data.as_ref(), &test_data[..]);
+
+        // Test range_inclusive method
+        let inclusive_data = data_stream.range_inclusive(1000, 1999).unwrap();
+        assert_eq!(inclusive_data.len(), 1000); // 1000 to 1999 inclusive = 1000 bytes
+        assert_eq!(inclusive_data.as_ref(), &test_data[1000..2000]);
+    }
+
+    #[tokio::test]
+    async fn test_data_stream_range_edge_cases() {
+        use std::collections::HashMap;
+
+        // Create smaller test data for edge case testing
+        let test_data = crate::Bytes::from((0..=255u8).cycle().take(5000).collect::<Vec<u8>>());
+
+        // Encrypt the data
+        let (data_map_chunk, chunks) = crate::self_encryption::encrypt(test_data.clone())
+            .expect("Failed to encrypt test data");
+
+        // Create mock storage
+        let mut chunk_storage = HashMap::new();
+        for chunk in &chunks {
+            let hash = xor_name::XorName::from_content(&chunk.value);
+            chunk_storage.insert(hash, chunk.clone());
+        }
+
+        let data_map_hash = xor_name::XorName::from_content(&data_map_chunk.value);
+        chunk_storage.insert(data_map_hash, data_map_chunk.clone());
+
+        let data_map_chunk = crate::chunk::DataMapChunk(data_map_chunk);
+        let restored_data_map: self_encryption::DataMap =
+            rmp_serde::from_slice(&data_map_chunk.0.value).expect("Failed to deserialize data map");
+
+        // Create chunk fetcher function that mimics the DataStream's behavior
+        let chunk_fetcher: ChunkFetcher = Box::new(move |chunk_names: &[(usize, xor_name::XorName)]| -> self_encryption::Result<Vec<(usize, crate::Bytes)>> {
+            let mut results = Vec::new();
+            for (i, hash) in chunk_names {
+                let chunk = chunk_storage.get(hash)
+                    .ok_or_else(|| self_encryption::Error::Generic("Chunk not found".to_string()))?;
+                results.push((*i, chunk.value.clone()));
+            }
+            Ok(results)
+        });
+
+        // Create streaming decrypt directly (same as DataStream would do internally)
+        let streaming_decrypt =
+            self_encryption::streaming_decrypt(&restored_data_map, chunk_fetcher)
+                .expect("Failed to create streaming decrypt");
+
+        // Create DataStream with our mocked streaming_decrypt
+        let data_stream = DataStream { streaming_decrypt };
+
+        // Test range beyond file size
+        let beyond_range = data_stream.get_range(10000, 1000).unwrap();
+        assert_eq!(beyond_range.len(), 0);
+
+        // Test range starting at file size
+        let at_end = data_stream.get_range(5000, 100).unwrap();
+        assert_eq!(at_end.len(), 0);
+
+        // Test range that partially exceeds file size
+        let partial_exceed = data_stream.get_range(4800, 400).unwrap();
+        assert_eq!(partial_exceed.len(), 200); // Only 200 bytes available from position 4800
+        assert_eq!(partial_exceed.as_ref(), &test_data[4800..]);
+
+        // Test zero-length range
+        let zero_len = data_stream.get_range(2500, 0).unwrap();
+        assert_eq!(zero_len.len(), 0);
+
+        // Test range at start of file
+        let at_start = data_stream.get_range(0, 100).unwrap();
+        assert_eq!(at_start.len(), 100);
+        assert_eq!(at_start.as_ref(), &test_data[0..100]);
+    }
+
     #[tokio::test]
     async fn test_data_stream_vs_data_get() {
         use std::collections::HashMap;

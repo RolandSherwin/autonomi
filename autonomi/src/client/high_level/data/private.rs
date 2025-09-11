@@ -75,10 +75,7 @@ impl Client {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn data_stream(
-        &self,
-        data_map: &DataMapChunk,
-    ) -> Result<impl Iterator<Item = Result<Bytes, GetError>> + use<>, GetError> {
+    pub async fn data_stream(&self, data_map: &DataMapChunk) -> Result<DataStream, GetError> {
         info!(
             "Starting streaming fetch of private data from datamap {:?}",
             data_map.0.address()
