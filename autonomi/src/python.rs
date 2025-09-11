@@ -29,6 +29,7 @@ use pyo3::{
 };
 use pyo3_async_runtimes::tokio::future_into_py;
 use serde::{Deserialize, Serialize};
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 use xor_name::{XOR_NAME_LEN, XorName};
 
@@ -38,7 +39,7 @@ use crate::{
     GraphEntry, GraphEntryAddress, InitialPeersConfig, MaxFeePerGas, Network as EVMNetwork,
     Pointer, PointerAddress, Scratchpad, ScratchpadAddress, Signature, TransactionConfig, Wallet,
     client::{
-        ClientEvent, UploadSummary,
+        ClientEvent, GetError, UploadSummary,
         chunk::DataMapChunk,
         data::DataAddress,
         files::{archive_private::PrivateArchiveDataMap, archive_public::ArchiveAddress},
@@ -896,6 +897,25 @@ impl PyClient {
         })
     }
 
+    /// Stream a blob of (private) data from the network. Returns a Python iterator.
+    /// Use this for large blobs of data to avoid loading everything into memory.
+    fn data_stream<'a>(
+        &self,
+        py: Python<'a>,
+        access: &PyDataMapChunk,
+    ) -> PyResult<Bound<'a, PyAny>> {
+        let client = self.inner.clone();
+        let access = access.inner.clone();
+
+        future_into_py(py, async move {
+            let stream = client
+                .data_stream(&access)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create stream: {e}")))?;
+            Ok(PyDataStream::new(stream))
+        })
+    }
+
     /// Get the estimated cost of storing a piece of data.
     fn data_cost<'a>(&self, py: Python<'a>, data: Vec<u8>) -> PyResult<Bound<'a, PyAny>> {
         let client = self.inner.clone();
@@ -946,6 +966,25 @@ impl PyClient {
                 .await
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to get data: {e}")))?;
             Ok(data.to_vec())
+        })
+    }
+
+    /// Stream a blob of public data from the network. Returns a Python iterator.
+    /// Use this for large blobs of data to avoid loading everything into memory.
+    fn data_stream_public<'a>(
+        &self,
+        py: Python<'a>,
+        addr: &PyDataAddress,
+    ) -> PyResult<Bound<'a, PyAny>> {
+        let client = self.inner.clone();
+        let addr = addr.inner;
+
+        future_into_py(py, async move {
+            let stream = client
+                .data_stream_public(&addr)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create stream: {e}")))?;
+            Ok(PyDataStream::new(stream))
         })
     }
 
@@ -3569,6 +3608,41 @@ impl PyDataMapChunk {
     }
 }
 
+/// Python iterator wrapper for data streaming
+#[pyclass(name = "DataStream")]
+pub struct PyDataStream {
+    inner: Mutex<Box<dyn Iterator<Item = Result<Bytes, GetError>> + Send>>,
+}
+
+impl PyDataStream {
+    fn new(stream: impl Iterator<Item = Result<Bytes, GetError>> + Send + 'static) -> Self {
+        Self {
+            inner: Mutex::new(Box::new(stream)),
+        }
+    }
+}
+
+#[pymethods]
+impl PyDataStream {
+    /// Make this object iterable
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    /// Get the next chunk from the stream
+    fn __next__(&mut self) -> PyResult<Option<Vec<u8>>> {
+        let mut stream = self
+            .inner
+            .lock()
+            .map_err(|e| PyRuntimeError::new_err(format!("Lock error: {e}")))?;
+        match stream.next() {
+            Some(Ok(chunk)) => Ok(Some(chunk.to_vec())),
+            Some(Err(e)) => Err(PyRuntimeError::new_err(format!("Stream error: {e}"))),
+            None => Ok(None),
+        }
+    }
+}
+
 #[pyfunction]
 fn encrypt(data: Vec<u8>) -> PyResult<(Vec<u8>, Vec<Vec<u8>>)> {
     let (data_map, chunks) = self_encryption::encrypt(Bytes::from(data))
@@ -4282,6 +4356,7 @@ fn autonomi_client_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyClientOperatingStrategy>()?;
     m.add_class::<PyDataAddress>()?;
     m.add_class::<PyDataMapChunk>()?;
+    m.add_class::<PyDataStream>()?;
     m.add_class::<PyDataTypes>()?;
     m.add_class::<PyDerivationIndex>()?;
     m.add_class::<PyDerivedPubkey>()?;
