@@ -17,9 +17,9 @@ use crate::client::data_types::scratchpad::ScratchpadError;
 use crate::client::key_derivation::{DerivationIndex, MainSecretKey};
 use crate::client::payment::PaymentOption;
 use crate::client::quote::CostError;
-use crate::client::utils::process_tasks_with_max_concurrency;
 use crate::client::{Client, GetError};
 use crate::graph::GraphError;
+use crate::utils::process_tasks_with_max_concurrency;
 use ant_evm::{AttoTokens, U256};
 use ant_protocol::Bytes;
 use ant_protocol::storage::{

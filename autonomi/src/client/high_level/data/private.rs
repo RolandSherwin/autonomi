@@ -10,9 +10,9 @@ use std::time::Instant;
 
 use crate::AttoTokens;
 use crate::Client;
-use crate::client::encryption::EncryptionStream;
 use crate::client::payment::PaymentOption;
 use crate::client::{GetError, PutError};
+use crate::self_encryption::EncryptionStream;
 
 pub use crate::Bytes;
 pub use crate::client::data_types::chunk::DataMapChunk;

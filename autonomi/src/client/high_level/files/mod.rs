@@ -17,8 +17,8 @@ use tracing::info;
 
 use crate::Client;
 use crate::client::data_types::chunk::ChunkAddress;
-use crate::client::utils::process_tasks_with_max_concurrency;
 use crate::client::{GetError, PutError, quote::CostError};
+use crate::utils::process_tasks_with_max_concurrency;
 use bytes::Bytes;
 use self_encryption::streaming_decrypt_from_storage;
 use xor_name::XorName;

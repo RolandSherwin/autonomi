@@ -15,6 +15,8 @@ use crate::{AttoTokens, Client};
 use bytes::Bytes;
 use std::path::PathBuf;
 
+use crate::self_encryption::encrypt_directory_files;
+
 impl Client {
     /// Download private file directly to filesystem. Always uses streaming.
     pub async fn file_download(
@@ -62,7 +64,7 @@ impl Client {
         info!("Uploading directory as private: {dir_path:?}");
 
         // encrypt
-        let encryption_results = self.encrypt_directory_files(dir_path, false).await?;
+        let encryption_results = encrypt_directory_files(dir_path, false).await?;
         let mut chunk_iterators = vec![];
         for encryption_result in encryption_results {
             match encryption_result {

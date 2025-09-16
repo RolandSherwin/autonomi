@@ -100,6 +100,9 @@ pub use bytes::Bytes;
 #[doc(no_inline)] // Place this under 'Re-exports' in the docs.
 pub use libp2p::Multiaddr;
 
+// private helper modules
+pub(crate) mod utils;
+
 #[doc(inline)]
 pub use client::{
     // Client

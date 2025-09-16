@@ -8,12 +8,12 @@
 
 use crate::Client;
 use crate::client::config::UPLOAD_FLOW_BATCH_SIZE;
-use crate::client::encryption::EncryptionStream;
 use crate::client::payment::PayError::EvmWalletError;
 use crate::client::payment::PaymentOption;
 use crate::client::payment::Receipt;
-use crate::client::utils::format_upload_error;
 use crate::client::{ClientEvent, PutError, UploadSummary};
+use crate::self_encryption::EncryptionStream;
+use crate::utils::format_upload_error;
 use ant_evm::{Amount, AttoTokens};
 use ant_protocol::storage::{Chunk, DataTypes};
 use evmlib::wallet::Error::InsufficientTokensForQuotes;

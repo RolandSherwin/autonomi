@@ -10,11 +10,11 @@ use ant_protocol::storage::DataTypes;
 use bytes::Bytes;
 use std::time::Instant;
 
-use crate::client::encryption::EncryptionStream;
 use crate::client::payment::PaymentOption;
 use crate::client::quote::CostError;
 use crate::client::{GetError, PutError};
 use crate::data::DataStream;
+use crate::self_encryption::EncryptionStream;
 use crate::{
     Client,
     chunk::{ChunkAddress, DataMapChunk},

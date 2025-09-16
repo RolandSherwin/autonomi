@@ -8,9 +8,9 @@
 
 use super::Client;
 use crate::client::config::CHUNK_UPLOAD_BATCH_SIZE;
-use crate::client::utils::process_tasks_with_max_concurrency;
 use crate::networking::Network;
 use crate::networking::common::Addresses;
+use crate::utils::process_tasks_with_max_concurrency;
 use ant_evm::payment_vault::get_market_price;
 use ant_evm::{Amount, PaymentQuote, QuotePayment, QuotingMetrics};
 pub use ant_protocol::storage::DataTypes;
