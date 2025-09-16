@@ -13,67 +13,13 @@ use crate::wallet::load_wallet;
 use autonomi::Bytes;
 use autonomi::ScratchpadAddress;
 use autonomi::TransactionConfig;
-use autonomi::client::data_types::scratchpad::ScratchpadError;
+use autonomi::client::data_types::scratchpad::{ScratchpadError, print_fork_analysis};
 use autonomi::client::scratchpad::SecretKey as ScratchpadSecretKey;
 use color_eyre::Section;
 use color_eyre::eyre::Context;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::eyre;
 use color_eyre::owo_colors::OwoColorize;
-
-/// Print detailed fork analysis for conflicting scratchpads
-fn print_fork_analysis(
-    conflicting_scratchpads: &[autonomi::client::data_types::scratchpad::Scratchpad],
-    scratchpad_key: &ScratchpadSecretKey,
-) {
-    println!("FORK ANALYSIS:");
-    println!("{}", "=".repeat(80));
-    println!(
-        "Retrieved {} conflicting scratchpad(s):",
-        conflicting_scratchpads.len()
-    );
-
-    // Sort by signature to ensure consistent ordering
-    let mut sorted_scratchpads = conflicting_scratchpads.to_vec();
-    sorted_scratchpads.sort_by(|a, b| {
-        hex::encode(a.signature().to_bytes()).cmp(&hex::encode(b.signature().to_bytes()))
-    });
-
-    // Show each conflicting scratchpad
-    for (i, scratchpad) in sorted_scratchpads.iter().enumerate() {
-        println!();
-        println!("#{} OF {}:", i + 1, sorted_scratchpads.len());
-        println!("  Counter: {}", scratchpad.counter());
-        println!("  Data type encoding: {}", scratchpad.data_encoding());
-        println!(
-            "  PublicKey/Address: {}",
-            hex::encode(scratchpad.owner().to_bytes())
-        );
-        println!(
-            "  Signature: {}",
-            hex::encode(scratchpad.signature().to_bytes())
-        );
-        println!(
-            "  Scratchpad hash: {}",
-            hex::encode(scratchpad.scratchpad_hash().0)
-        );
-        println!(
-            "  Encrypted data hash: {}",
-            hex::encode(scratchpad.encrypted_data_hash())
-        );
-
-        // Decrypt and show data
-        match scratchpad.decrypt_data(scratchpad_key) {
-            Ok(decrypted_data) => {
-                let data_str = String::from_utf8_lossy(&decrypted_data);
-                println!("  Decrypted data: \"{data_str}\"");
-            }
-            Err(decrypt_err) => {
-                println!("  Decryption failed: {decrypt_err}");
-            }
-        }
-    }
-}
 
 /// Generates a new general scratchpad key
 ///
@@ -213,7 +159,9 @@ pub async fn get(context: NetworkContext, name: String, secret_key: bool, hex: b
                 color_eyre::Report::new(ScratchpadError::Fork(conflicting_scratchpads.clone()))
                     .wrap_err("Failed to retrieve scratchpad from network");
             eprintln!("{error:?}");
-            print_fork_analysis(&conflicting_scratchpads, &scratchpad_key);
+            if let Err(e) = print_fork_analysis(&conflicting_scratchpads, &scratchpad_key) {
+                eprintln!("Failed to print fork analysis: {e}");
+            }
             std::process::exit(1);
         }
         Err(other_error) => {

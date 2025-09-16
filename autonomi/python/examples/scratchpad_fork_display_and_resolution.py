@@ -13,7 +13,7 @@ from autonomi_client import Client, SecretKey, PaymentOption, Wallet, EVMNetwork
 
 # Configuration constants
 INITIAL_SETUP_DELAY = 5  # seconds to wait after creating scratchpad
-FORK_CHECK_DELAY = 40    # seconds to wait before checking for fork
+FORK_CHECK_DELAY = 60    # seconds to wait for the network to settle down before checking for fork
 CONCURRENT_UPDATES_COUNT = 10  # number of concurrent update attempts
 WORD_SAMPLE_SIZE = 5     # number of words to sample for test data generation
 

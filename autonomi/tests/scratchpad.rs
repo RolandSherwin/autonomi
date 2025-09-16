@@ -12,6 +12,7 @@ use autonomi::client::payment::PaymentOption;
 use autonomi::scratchpad::ScratchpadError;
 use autonomi::{
     Client,
+    client::data_types::scratchpad::print_fork_analysis,
     client::scratchpad::{Bytes, Scratchpad},
 };
 use eyre::{Result, eyre};
@@ -353,7 +354,9 @@ async fn scratchpad_fork_display() -> Result<()> {
                 println!("No fork detected");
             }
             Err(ScratchpadError::Fork(conflicting_scratchpads)) => {
-                print_fork_details(&conflicting_scratchpads, &owner_key)?;
+                if let Err(e) = print_fork_analysis(&conflicting_scratchpads, &owner_key) {
+                    eprintln!("Failed to print fork analysis: {e}");
+                }
                 verify_fork_data(&conflicting_scratchpads, &owner_key)?;
                 println!("\nFork detection test passed!");
                 return Ok(());
@@ -365,54 +368,6 @@ async fn scratchpad_fork_display() -> Result<()> {
             panic!("Maximum attempts reached without fork detection - test failed");
         }
         println!("Retrying with new scratchpad...");
-    }
-    Ok(())
-}
-
-fn print_fork_details(
-    conflicting_scratchpads: &[Scratchpad],
-    owner_key: &bls::SecretKey,
-) -> Result<()> {
-    let mut sorted_scratchpads = conflicting_scratchpads.to_vec();
-    sorted_scratchpads.sort_by(|a, b| {
-        hex::encode(a.signature().to_bytes()).cmp(&hex::encode(b.signature().to_bytes()))
-    });
-
-    println!("\nFORK ANALYSIS:");
-    println!("{}", "=".repeat(80));
-    println!(
-        "Found {} conflicting scratchpads:",
-        sorted_scratchpads.len()
-    );
-
-    for (i, scratchpad) in sorted_scratchpads.iter().enumerate() {
-        println!("\n#{} OF {}:", i + 1, sorted_scratchpads.len());
-        println!("  Counter: {}", scratchpad.counter());
-        println!("  Data type encoding: {}", scratchpad.data_encoding());
-        println!(
-            "  PublicKey/Address: {}",
-            hex::encode(scratchpad.owner().to_bytes())
-        );
-        println!(
-            "  Signature: {}",
-            hex::encode(scratchpad.signature().to_bytes())
-        );
-        println!(
-            "  Scratchpad hash: {}",
-            hex::encode(scratchpad.scratchpad_hash().0)
-        );
-        println!(
-            "  Encrypted data hash: {}",
-            hex::encode(scratchpad.encrypted_data_hash())
-        );
-
-        match scratchpad.decrypt_data(owner_key) {
-            Ok(decrypted_data) => {
-                let data_str = String::from_utf8_lossy(&decrypted_data);
-                println!("  Decrypted data: \"{data_str}\"");
-            }
-            Err(decrypt_err) => println!("  Decryption failed: {decrypt_err}"),
-        }
     }
     Ok(())
 }
