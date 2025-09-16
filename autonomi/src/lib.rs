@@ -37,7 +37,7 @@
 //!
 //! # Data types
 //!
-//! This API gives access to two fundamental types on the network: Chunks and GraphEntry.
+//! This API gives access to the four fundamental types on the network: [`Chunk`], [`Pointer`], [`Scratchpad`] and [`GraphEntry`].
 //!
 //! When we upload data, it's split into chunks using self-encryption, yielding
 //! a 'datamap' allowing us to reconstruct the data again. Any two people that
