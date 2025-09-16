@@ -9,7 +9,7 @@
 pub mod key;
 pub mod user_data;
 
-pub use key::{VaultSecretKey, derive_vault_key};
+pub use key::{VaultSecretKey, vault_derive_key};
 pub use user_data::UserData;
 
 use crate::client::config::FILE_UPLOAD_BATCH_SIZE;
@@ -32,7 +32,7 @@ use tracing::info;
 /// The content type of the vault data
 /// The number is used to determine the type of the contents of the bytes contained in a vault
 /// Custom apps can use this to store their own custom types of data in vaults
-/// It is recommended to use the hash of the app name or an unique identifier as the content type using [`app_name_to_vault_content_type`]
+/// It is recommended to use the hash of the app name or an unique identifier as the content type using [`vault_content_type_from_app_name`]
 /// The value 0 is reserved for tests
 pub type VaultContentType = u64;
 
@@ -48,10 +48,19 @@ pub const NUM_OF_SCRATCHPADS_PER_GRAPH_ENTRY: usize = 1_000;
 pub const VAULT_HEAD_DERIVATION_INDEX: [u8; 32] = [0; 32];
 
 /// For custom apps using Vault, this function converts an app identifier or name to a [`VaultContentType`]
-pub fn app_name_to_vault_content_type<T: Hash>(s: T) -> VaultContentType {
+pub fn vault_content_type_from_app_name<T: Hash>(s: T) -> VaultContentType {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish()
+}
+
+/// @deprecated Use [`vault_content_type_from_app_name`] instead. This function will be removed in a future version.
+#[deprecated(
+    since = "0.6.0",
+    note = "Use `vault_content_type_from_app_name` instead"
+)]
+pub fn app_name_to_vault_content_type<T: Hash>(s: T) -> VaultContentType {
+    vault_content_type_from_app_name(s)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -196,7 +205,7 @@ impl Client {
         //       NUM_OF_SCRATCHPADS_PER_GRAPHENTRY to be claimed in one newly created GraphEntry.
         while scratchpad_derivations.len() < contents.len() {
             let (new_free_graphentry_derivation, new_scratchpad_derivations, graph_cost) = self
-                .expand_capacity(
+                .vault_expand_capacity(
                     &main_secret_key,
                     &cur_free_graphentry_derivation,
                     payment_option.clone(),
@@ -278,7 +287,7 @@ impl Client {
     //   * cur_free_graphentry_derivation: the output[0] of the tail of the linked GraphEntry
     //   * scratchpad_derivations: ordered by the creating order
     //   * graph_cost: cost paid to upload the GraphEntry
-    pub async fn expand_capacity(
+    pub async fn vault_expand_capacity(
         &self,
         main_secret_key: &MainSecretKey,
         cur_graphentry_derivation: &DerivationIndex,

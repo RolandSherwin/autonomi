@@ -8,7 +8,7 @@
 
 use ant_evm::AttoTokens;
 use ant_logging::LogBuilder;
-use autonomi::{Client, vault::app_name_to_vault_content_type};
+use autonomi::{Client, vault::vault_content_type_from_app_name};
 use eyre::Result;
 use serial_test::serial;
 use test_utils::{evm::get_funded_wallet, gen_random_data};
@@ -39,7 +39,7 @@ async fn vault_expand() -> Result<()> {
     let wallet = get_funded_wallet();
     let main_key = bls::SecretKey::random();
 
-    let content_type = app_name_to_vault_content_type("TestData");
+    let content_type = vault_content_type_from_app_name("TestData");
     let original_content = gen_random_data(1024);
 
     let cost = client

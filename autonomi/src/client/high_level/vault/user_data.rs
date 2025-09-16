@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use super::{VaultContentType, VaultError, VaultSecretKey, app_name_to_vault_content_type};
+use super::{VaultContentType, VaultError, VaultSecretKey, vault_content_type_from_app_name};
 use crate::chunk::DataMapChunk;
 use crate::client::Client;
 use crate::client::GetError;
@@ -24,7 +24,7 @@ use std::sync::LazyLock;
 
 /// Vault content type for UserDataVault
 pub static USER_DATA_VAULT_CONTENT_IDENTIFIER: LazyLock<VaultContentType> =
-    LazyLock::new(|| app_name_to_vault_content_type("UserData"));
+    LazyLock::new(|| vault_content_type_from_app_name("UserData"));
 
 pub type RegisterSecretKeyHex = String;
 pub type ScratchpadSecretKeyHex = String;
