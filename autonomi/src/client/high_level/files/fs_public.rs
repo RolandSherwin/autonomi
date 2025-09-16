@@ -68,9 +68,7 @@ impl Client {
         info!("Uploading directory: {dir_path:?}");
 
         // encrypt
-        let encryption_results = self
-            .encrypt_directory_files_in_memory(dir_path, true)
-            .await?;
+        let encryption_results = self.encrypt_directory_files(dir_path, true).await?;
         let mut chunk_iterators = vec![];
         for encryption_result in encryption_results {
             match encryption_result {

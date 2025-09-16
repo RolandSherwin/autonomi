@@ -259,7 +259,7 @@ impl EncryptionStream {
 
 impl Client {
     /// Encrypts all files in a directory and returns the encryption results (common logic)
-    pub(crate) async fn encrypt_directory_files_in_memory(
+    pub(crate) async fn encrypt_directory_files(
         &self,
         dir_path: PathBuf,
         is_public: bool,
