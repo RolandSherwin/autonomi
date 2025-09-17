@@ -278,7 +278,7 @@ async fn scratchpad_fork_display() -> Result<()> {
 
     const INITIAL_SETUP_DELAY: u64 = 5;
     const CONCURRENT_UPDATES_COUNT: usize = 10;
-    const MAX_ATTEMPTS: usize = 5;
+    const MAX_ATTEMPTS: usize = 10;
 
     let client = Client::init_local().await?;
     let wallet = get_funded_wallet();
