@@ -209,6 +209,7 @@ impl ReachabilityCheckSwarmDriver {
                         return Ok(status)
                     }
 
+                    #[cfg(feature = "open-metrics")]
                     if let Some(recorder) = &self.metrics_recorder {
                         let _ = recorder
                             .reachability_check_progress
@@ -412,6 +413,7 @@ impl ReachabilityCheckSwarmDriver {
             match self.get_reachability_status() {
                 Some(status) => {
                     info!("Reachability status has been found to be: {status:?}");
+                    #[cfg(feature = "open-metrics")]
                     if let Some(recorder) = &self.metrics_recorder {
                         let _ = recorder.reachability_check_progress.set(100.0);
                     }

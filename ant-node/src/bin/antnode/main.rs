@@ -32,6 +32,7 @@ use ant_logging::Level;
 use ant_logging::LogFormat;
 use ant_logging::LogOutputDest;
 use ant_logging::ReloadHandle;
+#[cfg(feature = "open-metrics")]
 use ant_logging::metrics::init_metrics;
 use ant_node::Marker;
 use ant_node::NodeBuilder;
@@ -400,6 +401,7 @@ fn run(
         rt.block_on(bootstrap_cache.write())?;
     }
 
+    #[cfg(feature = "open-metrics")]
     if opt.peers.local {
         rt.spawn(init_metrics(std::process::id()));
     }
