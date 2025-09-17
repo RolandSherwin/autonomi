@@ -235,6 +235,10 @@ impl EncryptionStream {
             drop(chunk_sender);
         });
 
+        #[cfg(feature = "loud")]
+        println!("Streaming encryption of {file_path} ...");
+        info!("Streaming encryption of {file_path} ...");
+
         let stream = EncryptionStream {
             file_path,
             relative_path,
