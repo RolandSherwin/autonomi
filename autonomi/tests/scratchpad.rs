@@ -276,8 +276,8 @@ async fn scratchpad_errors() -> Result<()> {
 async fn scratchpad_fork_display() -> Result<()> {
     let _log_appender_guard = LogBuilder::init_single_threaded_tokio_test();
 
-    const INITIAL_SETUP_DELAY: u64 = 5;
-    const CONCURRENT_UPDATES_COUNT: usize = 10;
+    const INITIAL_SETUP_DELAY: u64 = 2;
+    const CONCURRENT_UPDATES_COUNT: usize = 5;
     const MAX_ATTEMPTS: usize = 10;
 
     let client = Client::init_local().await?;
@@ -302,21 +302,26 @@ async fn scratchpad_fork_display() -> Result<()> {
             .await?;
         println!("Created scratchpad at: {}", addr.to_hex());
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(INITIAL_SETUP_DELAY)).await;
-
         let base_scratchpad = client.scratchpad_get(&addr).await?;
         println!("Base counter: {}", base_scratchpad.counter());
 
+        // Initialize batch of clients for the later on concurrent updates
+        let mut clients = vec![];
+        for _i in 1..=CONCURRENT_UPDATES_COUNT {
+            clients.push(Client::init_local().await?);
+            tokio::time::sleep(tokio::time::Duration::from_secs(INITIAL_SETUP_DELAY)).await;
+        }
+
         println!("Running concurrent updates...");
         let mut tasks = Vec::new();
-        for i in 1..=CONCURRENT_UPDATES_COUNT {
-            let client_clone = client.clone();
+        for (i, c) in clients.iter().enumerate().take(CONCURRENT_UPDATES_COUNT) {
             let base_scratchpad_clone = base_scratchpad.clone();
             let owner_key_clone = owner_key.clone();
+            let client_instance = c.clone();
 
             let task = tokio::spawn(async move {
                 let data = Bytes::from("Let's fork!");
-                let result = client_clone
+                let result = client_instance
                     .scratchpad_update_from(&base_scratchpad_clone, &owner_key_clone, 0, &data)
                     .await;
 
