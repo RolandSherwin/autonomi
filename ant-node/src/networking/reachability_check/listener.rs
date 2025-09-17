@@ -20,7 +20,6 @@ use futures::StreamExt;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
 use libp2p::Swarm;
-use libp2p::Transport;
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::multiaddr::Protocol;
@@ -51,7 +50,6 @@ impl ListenerManager {
     /// Initialize the ListenerManager by discovering available listen addresses.
     pub(crate) async fn new(
         keypair: &Keypair,
-        local: bool,
         listen_addr: SocketAddr,
         no_upnp: bool,
     ) -> Result<Self, NetworkError> {
@@ -63,12 +61,6 @@ impl ListenerManager {
         let transport = transport::build_transport(keypair, &mut metrics_registries);
         #[cfg(not(feature = "open-metrics"))]
         let transport = transport::build_transport(keypair);
-        let transport = if !local {
-            // Wrap upper in a transport that prevents dialing local addresses.
-            libp2p::core::transport::global_only::Transport::new(transport).boxed()
-        } else {
-            transport
-        };
 
         let behaviour: Toggle<upnp::behaviour::Behaviour> = if !no_upnp {
             Some(upnp::behaviour::Behaviour::default()).into()

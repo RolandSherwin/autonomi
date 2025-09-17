@@ -48,7 +48,6 @@ use ant_protocol::version::REQ_RESPONSE_VERSION_STR;
 use ant_protocol::version::get_network_id_str;
 use libp2p::Multiaddr;
 use libp2p::PeerId;
-use libp2p::Transport as _;
 use libp2p::core::transport::ListenerId;
 use libp2p::identity::Keypair;
 use libp2p::kad;
@@ -236,16 +235,9 @@ fn init_swarm_driver(
 
     // ==== Transport ====
     #[cfg(feature = "open-metrics")]
-    let main_transport = transport::build_transport(&config.keypair, &mut metrics_registries);
+    let transport = transport::build_transport(&config.keypair, &mut metrics_registries);
     #[cfg(not(feature = "open-metrics"))]
-    let main_transport = transport::build_transport(&config.keypair);
-    let transport = if !config.local {
-        debug!("Preventing non-global dials");
-        // Wrap upper in a transport that prevents dialing local addresses.
-        libp2p::core::transport::global_only::Transport::new(main_transport).boxed()
-    } else {
-        main_transport
-    };
+    let transport = transport::build_transport(&config.keypair);
 
     #[cfg(feature = "open-metrics")]
     let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
@@ -430,16 +422,9 @@ pub(crate) async fn init_reachability_check_swarm(
 
     // ==== Transport ====
     #[cfg(feature = "open-metrics")]
-    let main_transport = transport::build_transport(&config.keypair, &mut metrics_registries);
+    let transport = transport::build_transport(&config.keypair, &mut metrics_registries);
     #[cfg(not(feature = "open-metrics"))]
-    let main_transport = transport::build_transport(&config.keypair);
-    let transport = if !config.local {
-        debug!("Preventing non-global dials");
-        // Wrap upper in a transport that prevents dialing local addresses.
-        libp2p::core::transport::global_only::Transport::new(main_transport).boxed()
-    } else {
-        main_transport
-    };
+    let transport = transport::build_transport(&config.keypair);
 
     #[cfg(feature = "open-metrics")]
     let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
@@ -494,7 +479,6 @@ pub(crate) async fn init_reachability_check_swarm(
     let swarm_driver = ReachabilityCheckSwarmDriver::new(
         swarm,
         &config.keypair,
-        config.local,
         config.listen_addr,
         config.initial_contacts,
         config.no_upnp,
