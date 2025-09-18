@@ -27,6 +27,7 @@
 #[macro_use]
 extern crate tracing;
 
+mod critical_failure;
 mod error;
 mod event;
 mod listen_addr_writer;
@@ -45,6 +46,8 @@ pub mod spawn;
 #[allow(missing_docs)]
 pub mod utils;
 
+pub use self::critical_failure::reset_critical_failure;
+pub use self::critical_failure::set_critical_failure;
 pub use self::error::Error;
 pub use self::error::PutValidationError;
 pub use self::event::NodeEvent;
@@ -58,7 +61,6 @@ pub use self::node::NodeBuilder;
 pub use self::node::PERIODIC_REPLICATION_INTERVAL_MAX_S;
 
 use crate::error::Result;
-
 use crate::networking::Network;
 pub use crate::networking::SwarmLocalState;
 use ant_evm::RewardsAddress;

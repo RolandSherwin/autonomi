@@ -6,6 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use super::SwarmDriver;
 use crate::networking::Addresses;
 use crate::networking::CLOSE_GROUP_SIZE;
 use crate::networking::NetworkError;
@@ -18,8 +19,6 @@ use libp2p::kad::QueryResult;
 use libp2p::kad::{self};
 use std::collections::hash_map::Entry;
 use std::time::Instant;
-
-use super::SwarmDriver;
 
 impl SwarmDriver {
     pub(super) fn handle_kad_event(&mut self, kad_event: libp2p::kad::Event) -> Result<()> {

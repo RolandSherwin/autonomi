@@ -13,12 +13,9 @@
 #[macro_use]
 extern crate tracing;
 
-mod criticial_failure;
 mod rpc_service;
 mod subcommands;
 
-use crate::criticial_failure::reset_critical_failure;
-use crate::criticial_failure::set_critical_failure;
 use crate::rpc_service::NodeCtrl;
 use crate::rpc_service::StopResult;
 use crate::subcommands::EvmNetworkCommand;
@@ -39,6 +36,8 @@ use ant_node::NodeBuilder;
 use ant_node::NodeEvent;
 use ant_node::NodeEventsReceiver;
 use ant_node::ReachabilityStatus;
+use ant_node::reset_critical_failure;
+use ant_node::set_critical_failure;
 use ant_node::utils::get_antnode_root_dir;
 use ant_node::utils::get_root_dir_and_keypair;
 use ant_protocol::version;
@@ -51,6 +50,7 @@ use std::env;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -361,12 +361,12 @@ fn main() {
         rewards_address,
         evm_network,
         node_socket_addr,
-        root_dir,
+        root_dir.clone(),
     ) {
         error!("Node failed with error: {err}");
         eprintln!("Node failed with error: {err}");
 
-        set_critical_failure(&log_output_dest, &err);
+        set_critical_failure(&root_dir, &err);
 
         std::process::exit(1);
     }
@@ -414,7 +414,7 @@ fn run(
             rewards_address,
             evm_network,
             node_socket_addr,
-            root_dir,
+            root_dir.clone(),
         );
         node_builder.with_reachability_check(!opt.skip_reachability_check);
         node_builder.local(opt.peers.local);
@@ -432,7 +432,14 @@ fn run(
         #[cfg(feature = "open-metrics")]
         node_builder.metrics_server_port(metrics_server_port);
 
-        run_node(node_builder, opt.rpc, log_output_dest, log_reload_handle).await
+        run_node(
+            node_builder,
+            opt.rpc,
+            &root_dir,
+            log_output_dest,
+            log_reload_handle,
+        )
+        .await
     })?;
 
     // actively shut down the runtime
@@ -457,21 +464,25 @@ fn run(
 async fn run_node(
     mut node_builder: NodeBuilder,
     rpc: Option<SocketAddr>,
+    root_dir: &Path,
     log_output_dest: &str,
     log_reload_handle: ReloadHandle,
 ) -> Result<Option<(bool, PathBuf, u16)>, ant_node::Error> {
     let started_instant = std::time::Instant::now();
 
-    reset_critical_failure(log_output_dest);
+    reset_critical_failure(root_dir);
 
     info!("Starting node ...");
     if node_builder.reachability_check {
         info!("Running reachability check ... This might take a few minutes to complete.");
         let status = node_builder.run_reachability_check().await;
         match status {
-            Ok(ReachabilityStatus::Reachable {
-                local_addr, upnp, ..
-            }) => {
+            Ok((
+                ReachabilityStatus::Reachable {
+                    local_addr, upnp, ..
+                },
+                _shutdown_tx,
+            )) => {
                 info!(
                     "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}",
                     local_addr.ip()
@@ -483,7 +494,7 @@ async fn run_node(
                 node_builder.no_upnp(!upnp);
                 node_builder.with_socket_addr(local_addr);
             }
-            Ok(ReachabilityStatus::NotReachable { .. }) => {
+            Ok((ReachabilityStatus::NotReachable { .. }, _shutdown_tx)) => {
                 info!(
                     "Reachability check: NotReachable. Terminating node as we are not externally reachable."
                 );
