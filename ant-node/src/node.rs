@@ -800,8 +800,7 @@ impl Node {
                 });
                 let record_key = key.to_record_key();
 
-                if let Ok(Some(record)) = network.get_local_record(&record_key).await
-                {
+                if let Ok(Some(record)) = network.get_local_record(&record_key).await {
                     result = Ok((our_address, Bytes::from(record.value)));
                 }
 
