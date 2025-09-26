@@ -19,7 +19,6 @@ use crate::networking::driver::SwarmDriver;
 use crate::networking::driver::network_discovery::NetworkDiscovery;
 use crate::networking::error::NetworkError;
 use crate::networking::error::Result;
-use crate::networking::external_address::ExternalAddressManager;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::MetadataExtendedRecorder;
 #[cfg(feature = "open-metrics")]
@@ -349,14 +348,6 @@ fn init_swarm_driver(
 
     let replication_fetcher = ReplicationFetcher::new(peer_id, network_event_sender.clone());
 
-    // Enable external address manager for public nodes
-    let external_address_manager = if !config.local {
-        Some(ExternalAddressManager::new(peer_id))
-    } else {
-        info!("External address manager is disabled for local nodes.");
-        None
-    };
-
     let is_upnp_enabled = swarm.behaviour().upnp.is_enabled();
     let swarm_driver = SwarmDriver {
         swarm,
@@ -368,7 +359,6 @@ fn init_swarm_driver(
         initial_bootstrap: InitialBootstrap::new(config.initial_contacts),
         initial_bootstrap_trigger: InitialBootstrapTrigger::new(is_upnp_enabled),
         bootstrap_cache: config.bootstrap_cache,
-        external_address_manager,
         replication_fetcher,
         #[cfg(feature = "open-metrics")]
         metrics_recorder,
