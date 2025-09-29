@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 *When editing this file, please respect a line length of 100.*
 
+## 2025-09-29
+
+### API
+
+#### Added
+
+- `DataStream` struct with streaming data access methods:
+  - `data_size()` returns the original data size
+  - `get_range(start, len)` decrypts and returns a specific byte range
+  - `range(range)` convenience method using Range syntax
+  - `range_from(start)` gets range from starting position to end
+  - `range_to(end)` gets range from beginning to end position
+  - `range_full()` gets the entire file content
+  - `range_inclusive(start, end)` gets an inclusive range
+- `data_stream(&DataMapChunk)` async method on `Client` for creating streaming access to private
+  data.
+- `data_stream_public(&DataAddress)` async method on `Client` for creating streaming access to
+  public data.
+- `scratchpad_put_update` async method for wallet-free scratchpad updates with caller-controlled
+  management.
+- `print_fork_analysis` function for detailed scratchpad fork error analysis and display.
+- `vault_expand_capacity` async method for expanding vault storage capacity.
+- `vault_claimed_capacity` async method for checking claimed vault capacity.
+- `vault_split_bytes` function for splitting bytes for vault storage.
+
+#### Changed
+
+- Client initialization now includes automatic network connectivity verification via
+  `wait_for_connectivity()` during the `init` process, improving reliability and error diagnostics.
+- Scratchpad error handling enhanced with fork resolution capabilities in update operations, solving
+  code duplication issues.
+- Vault function names updated for consistency:
+  - `fetch_and_decrypt_vault` → `vault_get` (deprecated function retained for compatibility)
+  - `write_bytes_to_vault` → `vault_put` (deprecated function retained for compatibility)
+  - `app_name_to_vault_content_type` → `vault_content_type_from_app_name` (deprecated function retained for compatibility)
+- Code organization improved by moving encryption and utility modules out of the client module to
+  top-level `self_encryption` and `utils` modules.
+
+#### Fixed
+
+- Analyze functionality now properly handles old datamap format types for backward compatibility.
+- Scratchpad fork display and resolution issues resolved across all API operations.
+- Streaming operations now validate destination paths before processing to prevent errors.
+
+### Language Bindings
+
+#### Added
+
+**Python:**
+- `GraphEntry` class methods for member access:
+  - `content()` returns the entry content
+  - `parents()` returns parent entry references
+  - `descendants()` returns descendant entry references
+- Data streaming bindings providing Python access to the new streaming data APIs.
+- Enhanced fork error display functionality for scratchpad operations with comprehensive error
+  details.
+- Comprehensive test coverage for all Python binding functionality including address format
+  validation.
+
+**Node.js:**
+- Updated vault operation support with new function names matching the renamed API standards.
+
+#### Fixed
+
+- Python binding tests updated to handle 96-character address hex format and proper `from_hex`
+  round-trip conversions.
+- `GraphEntry` bindings now properly expose all member access methods with correct error handling.
+
+### Ant Client
+
+#### Added
+
+- Enhanced scratchpad command functionality with improved fork error handling and resolution capabilities.
+- Better error reporting for scratchpad operations with detailed fork analysis output.
+
+#### Fixed
+
+- Scratchpad fork display and resolution functionality now works correctly across all client command
+  operations.
+- Get record operations now only perform early returns when unique content is received from
+  sufficient peers, improving data retrieval reliability.
+
+### Launchpad
+
+#### Fixed
+
+- Node storage size handling corrected for ARM v7 architecture devices.
+- Node addition process on Windows now functions properly without configuration conflicts.
+
 ## 2025-09-02
 
 ### API
