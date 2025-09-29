@@ -184,13 +184,13 @@ impl ServiceControl for ServiceController {
         );
         let system = System::new_all();
         for (pid, process) in system.processes() {
-            if let Some(path) = process.exe() {
-                if bin_path == path {
-                    // There does not seem to be any easy way to get the process ID from the `Pid`
-                    // type. Probably something to do with representing it in a cross-platform way.
-                    trace!("Found process {bin_path:?} with PID: {pid}");
-                    return Ok(pid.to_string().parse::<u32>()?);
-                }
+            if let Some(path) = process.exe()
+                && bin_path == path
+            {
+                // There does not seem to be any easy way to get the process ID from the `Pid`
+                // type. Probably something to do with representing it in a cross-platform way.
+                trace!("Found process {bin_path:?} with PID: {pid}");
+                return Ok(pid.to_string().parse::<u32>()?);
             }
         }
         error!(
