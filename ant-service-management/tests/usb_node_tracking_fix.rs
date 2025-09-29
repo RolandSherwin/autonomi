@@ -1,7 +1,7 @@
 // Integration test for AUTO-46: safenode-manager node tracking fix
 // Tests that nodes started from external USB are properly tracked
 
-use ant_service_management::control::ServiceController;
+use ant_service_management::control::{ServiceControl, ServiceController};
 use std::path::Path;
 
 #[test]
@@ -61,11 +61,11 @@ fn test_usb_node_scenario() {
     // 2. Nodes 21-40 are started from external USB (name match needed)
 
     let normal_nodes: Vec<_> = (1..=20)
-        .map(|i| format!("/var/antctl/services/antnode{i}/antnode"))
+        .map(|i| format!("/var/antctl/services/antnode{}/antnode", i))
         .collect();
 
     let usb_nodes: Vec<_> = (21..=40)
-        .map(|_i| "/media/usb/batch2/antnode".to_string())
+        .map(|i| format!("/media/usb/batch2/antnode"))
         .collect();
 
     // All should have the same executable name
