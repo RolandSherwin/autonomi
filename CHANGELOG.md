@@ -41,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vault function names updated for consistency:
   - `fetch_and_decrypt_vault` → `vault_get` (deprecated function retained for compatibility)
   - `write_bytes_to_vault` → `vault_put` (deprecated function retained for compatibility)
-  - `app_name_to_vault_content_type` → `vault_content_type_from_app_name` (deprecated function retained for compatibility)
+  - `app_name_to_vault_content_type` → `vault_content_type_from_app_name` (deprecated function
+    retained for compatibility)
 - Code organization improved by moving encryption and utility modules out of the client module to
   top-level `self_encryption` and `utils` modules.
 
@@ -79,8 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
-- Enhanced scratchpad command functionality with improved fork error handling and resolution capabilities.
+- Enhanced `scratchpad` command functionality with improved fork error handling and resolution
+  capabilities.
 - Better error reporting for scratchpad operations with detailed fork analysis output.
+- The `download` command has improved error handling to immediately fail if the chosen download path
+  cannot be used.
 
 #### Fixed
 
@@ -88,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operations.
 - Get record operations now only perform early returns when unique content is received from
   sufficient peers, improving data retrieval reliability.
+- The `analyze` command now properly handles file references in the old datamap format.
 
 ### Launchpad
 
