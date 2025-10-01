@@ -104,7 +104,7 @@ void = "1.0.2"
 [dev-dependencies]
 ant-protocol = { path = "../ant-protocol", version = "1.0.9", features = ["rpc"] }
 assert_fs = "1.0.0"
-evmlib = { path = "../evmlib", version = "0.4.3" }
+evmlib = { path = "../evmlib", version = "0.4.4" }
 autonomi = { path = "../autonomi", version = "0.6.1" }
 reqwest = { version = "0.12.2", default-features = false, features = [
     "rustls-tls-manual-roots",

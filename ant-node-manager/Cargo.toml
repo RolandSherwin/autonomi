@@ -36,7 +36,7 @@ ant-logging = { path = "../ant-logging", version = "0.2.52" }
 ant-protocol = { path = "../ant-protocol", version = "1.0.9" }
 ant-releases = { version = "0.4.1" }
 ant-service-management = { path = "../ant-service-management", version = "0.4.16" }
-evmlib = { path = "../evmlib", version = "0.4.3" }
+evmlib = { path = "../evmlib", version = "0.4.4" }
 chrono = "~0.4.19"
 clap = { version = "4.4.6", features = ["derive", "env"] }
 colored = "2.0.4"

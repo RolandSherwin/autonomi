@@ -37,7 +37,7 @@ bytes = { version = "1.0.1", features = ["serde"] }
 const-hex = "1.12.0"
 custom_debug = "~0.6.1"
 dirs-next = "2.0.0"
-evmlib = { path = "../evmlib", version = "0.4.3" }
+evmlib = { path = "../evmlib", version = "0.4.4" }
 exponential-backoff = "2.0.0"
 eyre = "0.6.5"
 futures = "0.3.30"
@@ -78,7 +78,7 @@ xor_name = "5.0.0"
 [dev-dependencies]
 alloy = { version = "1.0.32", default-features = false, features = ["contract", "json-rpc", "network", "node-bindings", "provider-http", "reqwest-rustls-tls", "rpc-client", "rpc-types", "signer-local", "std"] }
 ant-logging = { path = "../ant-logging", version = "0.2.52" }
-evmlib = { path = "../evmlib", version = "0.4.3" }
+evmlib = { path = "../evmlib", version = "0.4.4" }
 eyre = "0.6.5"
 serial_test = "3.2.0"
 tempfile = "3.12.0"
