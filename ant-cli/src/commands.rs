@@ -103,7 +103,7 @@ pub enum FileCmd {
         #[arg(long)]
         #[clap(default_value = "0")]
         retry_failed: u64,
-        /// Use single node payment mode. Pay only the highest priced node with 10x that amount instead of paying 3 nodes.
+        /// Use single node payment mode. Pay only the highest priced node with 3x that amount instead of paying 3 nodes.
         /// Data is still stored on 5 nodes.
         /// This saves on gas fees but increases upload token cost.
         #[arg(long, short = 's')]

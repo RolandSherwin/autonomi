@@ -26,7 +26,7 @@ pub enum PaymentMode {
     /// Default mode: Pay 3 nodes
     #[default]
     Standard,
-    /// Alternative mode: Pay only the highest priced node with 10x the quoted amount
+    /// Alternative mode: Pay only the highest priced node with 3x the quoted amount
     SingleNode,
 }
 
@@ -273,7 +273,7 @@ impl Client {
         Ok(quotes_to_pay_per_addr)
     }
 
-    /// Process quotes for single node payment mode (pay only highest priced node with 10x amount)
+    /// Process quotes for single node payment mode (pay only highest priced node with 3x amount)
     fn process_single_node_payment_quotes(
         &self,
         quotes_per_addr: HashMap<XorName, Vec<(PeerId, Addresses, PaymentQuote, Amount)>>,
@@ -314,7 +314,7 @@ impl Client {
         ])
     }
 
-    /// Create payment structure for single node mode (pay only highest priced node with 10x)
+    /// Create payment structure for single node mode (pay only highest priced node with 3x)
     fn create_single_node_quote_payment(
         &self,
         quotes: &mut [(PeerId, Addresses, PaymentQuote, Amount)],
@@ -328,7 +328,7 @@ impl Client {
             .expect("quotes should not be empty as we checked len >= MINIMUM_QUOTES_TO_PAY");
 
         let node_to_pay = self.select_highest_priced_node(quotes, highest_price);
-        let enhanced_price = highest_price * Amount::from(10u64);
+        let enhanced_price = highest_price * Amount::from(3u64);
 
         // Sort by distance to maintain the closest 5 nodes
         self.sort_quotes_by_distance(quotes, content_addr);
@@ -372,10 +372,10 @@ impl Client {
 
         for (i, (peer_id, addrs, quote, original_price)) in quotes.iter().take(5).enumerate() {
             if *peer_id == node_to_pay && !paid_node {
-                // Pay the selected highest priced node 10x
+                // Pay the selected highest priced node 3x
                 payment_list.push((*peer_id, addrs.clone(), quote.clone(), enhanced_price));
                 trace!(
-                    "Single peer to pay for {content_addr}: {peer_id:?} (position {}) with price {enhanced_price} (10x of {highest_price})",
+                    "Single peer to pay for {content_addr}: {peer_id:?} (position {}) with price {enhanced_price} (3x of {highest_price})",
                     i + 1
                 );
                 paid_node = true;
