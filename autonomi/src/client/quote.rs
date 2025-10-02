@@ -266,7 +266,11 @@ impl Client {
                 let quote_for_addr = self.create_standard_quote_payment(&quotes, content_addr);
                 quotes_to_pay_per_addr.insert(content_addr, quote_for_addr);
             } else {
-                return Err(self.create_insufficient_quotes_error(content_addr, quotes.len(), MINIMUM_QUOTES_TO_PAY));
+                return Err(self.create_insufficient_quotes_error(
+                    content_addr,
+                    quotes.len(),
+                    MINIMUM_QUOTES_TO_PAY,
+                ));
             }
         }
 
@@ -283,17 +287,22 @@ impl Client {
 
         for (content_addr, mut quotes) in quotes_per_addr {
             if quotes.len() >= MINIMUM_QUOTES_TO_PAY {
-                let quote_for_addr = self.create_single_node_quote_payment(&mut quotes, content_addr);
+                let quote_for_addr =
+                    self.create_single_node_quote_payment(&mut quotes, content_addr);
                 quotes_to_pay_per_addr.insert(content_addr, quote_for_addr);
             } else {
-                return Err(self.create_insufficient_quotes_error(content_addr, quotes.len(), MINIMUM_QUOTES_TO_PAY));
+                return Err(self.create_insufficient_quotes_error(
+                    content_addr,
+                    quotes.len(),
+                    MINIMUM_QUOTES_TO_PAY,
+                ));
             }
         }
 
         Ok(quotes_to_pay_per_addr)
     }
 
-    /// Create payment structure for standard mode (pay nodes at indices 2, 3, 4)
+    /// Create a payment structure for standard mode (pay nodes at indices 2, 3, 4)
     fn create_standard_quote_payment(
         &self,
         quotes: &[(PeerId, Addresses, PaymentQuote, Amount)],
@@ -314,87 +323,41 @@ impl Client {
         ])
     }
 
-    /// Create payment structure for single node mode (pay only highest priced node with 3x)
+    /// Create a payment structure for single node mode (pay only the highest priced node with 3x the amount)
     fn create_single_node_quote_payment(
         &self,
         quotes: &mut [(PeerId, Addresses, PaymentQuote, Amount)],
         content_addr: XorName,
     ) -> QuoteForAddress {
-        // Find the highest price and select node to pay
-        let highest_price = quotes
-            .iter()
-            .map(|(_, _, _, price)| *price)
-            .max()
-            .expect("quotes should not be empty as we checked len >= MINIMUM_QUOTES_TO_PAY");
+        // Get the highest priced node (index 4 after already sorting by price)
+        let (p5, a5, q5, highest_price) = &quotes[4];
+        let enhanced_price = *highest_price * Amount::from(3u64);
 
-        let node_to_pay = self.select_highest_priced_node(quotes, highest_price);
-        let enhanced_price = highest_price * Amount::from(3u64);
+        trace!(
+            "Single peer to pay for {content_addr}: {p5:?} with price {enhanced_price} (3x of {highest_price})"
+        );
 
-        // Sort by distance to maintain the closest 5 nodes
-        self.sort_quotes_by_distance(quotes, content_addr);
+        let (p1, a1, q1, _) = &quotes[0];
+        let (p2, a2, q2, _) = &quotes[1];
+        let (p3, a3, q3, _) = &quotes[2];
+        let (p4, a4, q4, _) = &quotes[3];
 
-        // Build payment list
-        self.build_single_node_payment_list(quotes, node_to_pay, enhanced_price, highest_price, content_addr)
-    }
-
-    /// Select the first node with the highest price (deterministic selection)
-    fn select_highest_priced_node(
-        &self,
-        quotes: &[(PeerId, Addresses, PaymentQuote, Amount)],
-        highest_price: Amount,
-    ) -> PeerId {
-        quotes
-            .iter()
-            .find(|(_, _, _, price)| *price == highest_price)
-            .map(|(peer_id, _, _, _)| *peer_id)
-            .expect("At least one node should have the highest price")
-    }
-
-    /// Sort quotes by distance to the content address
-    fn sort_quotes_by_distance(&self, quotes: &mut [(PeerId, Addresses, PaymentQuote, Amount)], content_addr: XorName) {
-        quotes.sort_by_key(|(peer_id, _, _, _)| {
-            NetworkAddress::from(*peer_id)
-                .distance(&NetworkAddress::from(ChunkAddress::new(content_addr)))
-        });
-    }
-
-    /// Build payment list for single node mode
-    fn build_single_node_payment_list(
-        &self,
-        quotes: &[(PeerId, Addresses, PaymentQuote, Amount)],
-        node_to_pay: PeerId,
-        enhanced_price: Amount,
-        highest_price: Amount,
-        content_addr: XorName,
-    ) -> QuoteForAddress {
-        let mut payment_list = Vec::new();
-        let mut paid_node = false;
-
-        for (i, (peer_id, addrs, quote, original_price)) in quotes.iter().take(5).enumerate() {
-            if *peer_id == node_to_pay && !paid_node {
-                // Pay the selected highest priced node 3x
-                payment_list.push((*peer_id, addrs.clone(), quote.clone(), enhanced_price));
-                trace!(
-                    "Single peer to pay for {content_addr}: {peer_id:?} (position {}) with price {enhanced_price} (3x of {highest_price})",
-                    i + 1
-                );
-                paid_node = true;
-            } else {
-                // Other nodes store but don't get paid
-                payment_list.push((*peer_id, addrs.clone(), quote.clone(), Amount::ZERO));
-                if *original_price == highest_price && *peer_id != node_to_pay {
-                    trace!(
-                        "Node {peer_id:?} also has highest price {highest_price} but won't be paid"
-                    );
-                }
-            }
-        }
-
-        QuoteForAddress(payment_list)
+        QuoteForAddress(vec![
+            (*p1, a1.clone(), q1.clone(), Amount::ZERO),
+            (*p2, a2.clone(), q2.clone(), Amount::ZERO),
+            (*p3, a3.clone(), q3.clone(), Amount::ZERO),
+            (*p4, a4.clone(), q4.clone(), Amount::ZERO),
+            (*p5, a5.clone(), q5.clone(), enhanced_price),
+        ])
     }
 
     /// Create error for insufficient quotes
-    fn create_insufficient_quotes_error(&self, content_addr: XorName, got: usize, required: usize) -> CostError {
+    fn create_insufficient_quotes_error(
+        &self,
+        content_addr: XorName,
+        got: usize,
+        required: usize,
+    ) -> CostError {
         error!(
             "Not enough quotes for content_addr: {content_addr}, got: {got} and need at least {required}"
         );
