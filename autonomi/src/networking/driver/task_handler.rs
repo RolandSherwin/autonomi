@@ -399,7 +399,7 @@ impl TaskHandler {
         trace!("OutboundRequestId({id}): got version: {version}");
         responder
             .send(Ok(version))
-            .map_err(|_| TaskHandlerError::NetworkClientDropped)?;
+            .map_err(|_| TaskHandlerError::NetworkClientDropped(format!("{id:?}")))?;
         Ok(())
     }
 

@@ -177,8 +177,7 @@ mod tests {
             let parsed = PackageVersion::try_from(version_str.to_string()).unwrap();
             assert_eq!(
                 parsed, expected,
-                "Failed to parse version string: {}",
-                version_str
+                "Failed to parse version string: {version_str}"
             );
         }
     }
