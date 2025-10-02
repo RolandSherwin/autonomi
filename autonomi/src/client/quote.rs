@@ -9,6 +9,7 @@
 use super::Client;
 use crate::client::config::CHUNK_UPLOAD_BATCH_SIZE;
 use crate::networking::Network;
+use crate::networking::PeerInfo;
 use crate::networking::common::Addresses;
 use crate::utils::process_tasks_with_max_concurrency;
 use ant_evm::payment_vault::get_market_price;
@@ -122,6 +123,37 @@ impl Client {
         let parallism = std::cmp::min(*CHUNK_UPLOAD_BATCH_SIZE * 8, 128);
 
         process_tasks_with_max_concurrency(futures, parallism).await
+    }
+
+    /// Get a raw quote from a specific peer.
+    /// This quote does not include actual record prices.
+    /// Returns None if the record already exists and no payment is needed.
+    ///
+    /// Can also be used to get a reward address from a specific peer as it will be embedded in the quote.
+    pub async fn get_raw_quote_from_peer(
+        &self,
+        content_addr: XorName,
+        peer: PeerInfo,
+        data_type: DataTypes,
+        data_size: usize,
+    ) -> Result<Option<(PeerId, Addresses, PaymentQuote)>, CostError> {
+        let network_addr = NetworkAddress::from(ChunkAddress::new(content_addr));
+
+        match self
+            .network
+            .get_quote(network_addr, peer.clone(), data_type.get_index(), data_size)
+            .await
+        {
+            Ok(Some((peer_info, quote))) => match quote.peer_id() {
+                Ok(peer_id) => Ok(Some((peer_id, Addresses(peer_info.addrs), quote))),
+                Err(e) => {
+                    warn!("Invalid peer id in quote: {e}");
+                    Err(CostError::InvalidCost)
+                }
+            },
+            Ok(None) => Ok(None), // Record already exists, no payment needed
+            Err(e) => Err(CostError::Network(e)),
+        }
     }
 
     pub async fn get_store_quotes(
