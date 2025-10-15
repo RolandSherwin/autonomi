@@ -6,56 +6,68 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::networking::{
-    CLOSE_GROUP_SIZE, NetworkEvent,
-    bootstrap::{InitialBootstrap, InitialBootstrapTrigger},
-    circular_vec::CircularVec,
-    driver::{NodeBehaviour, SwarmDriver, network_discovery::NetworkDiscovery},
-    error::{NetworkError, Result},
-    external_address::ExternalAddressManager,
-    reachability_check::{ReachabilityCheckBehaviour, ReachabilityCheckSwarmDriver},
-    record_store::{NodeRecordStore, NodeRecordStoreConfig},
-    relay_manager::RelayManager,
-    replication_fetcher::ReplicationFetcher,
-    transport,
-};
+use crate::networking::CLOSE_GROUP_SIZE;
 #[cfg(feature = "open-metrics")]
-use crate::networking::{
-    MetricsRegistries, metrics::NetworkMetricsRecorder, metrics::service::run_metrics_server,
-};
+use crate::networking::MetricsRegistries;
+use crate::networking::NetworkEvent;
+use crate::networking::bootstrap::InitialBootstrap;
+use crate::networking::bootstrap::InitialBootstrapTrigger;
+use crate::networking::circular_vec::CircularVec;
+use crate::networking::driver::NodeBehaviour;
+use crate::networking::driver::SwarmDriver;
+use crate::networking::driver::network_discovery::NetworkDiscovery;
+use crate::networking::error::NetworkError;
+use crate::networking::error::Result;
+use crate::networking::external_address::ExternalAddressManager;
+#[cfg(feature = "open-metrics")]
+use crate::networking::metrics::NetworkMetricsRecorder;
+#[cfg(feature = "open-metrics")]
+use crate::networking::metrics::service::run_metrics_server;
+use crate::networking::reachability_check::ReachabilityCheckBehaviour;
+use crate::networking::reachability_check::ReachabilityCheckSwarmDriver;
+use crate::networking::record_store::NodeRecordStore;
+use crate::networking::record_store::NodeRecordStoreConfig;
+use crate::networking::relay_manager::RelayManager;
+use crate::networking::replication_fetcher::ReplicationFetcher;
+use crate::networking::transport;
 use ant_bootstrap::BootstrapCacheStore;
-use ant_protocol::constants::{KAD_STREAM_PROTOCOL_ID, MAX_PACKET_SIZE, REPLICATION_FACTOR};
-use ant_protocol::messages::{Request, Response};
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintKBucketKey;
+use ant_protocol::constants::KAD_STREAM_PROTOCOL_ID;
+use ant_protocol::constants::MAX_PACKET_SIZE;
+use ant_protocol::constants::REPLICATION_FACTOR;
+use ant_protocol::messages::Request;
+use ant_protocol::messages::Response;
+use ant_protocol::version::IDENTIFY_PROTOCOL_STR;
 use ant_protocol::version::IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR;
-use ant_protocol::{
-    NetworkAddress, PrettyPrintKBucketKey,
-    version::{IDENTIFY_PROTOCOL_STR, REQ_RESPONSE_VERSION_STR, get_network_id_str},
-};
+use ant_protocol::version::REQ_RESPONSE_VERSION_STR;
+use ant_protocol::version::get_network_id_str;
 use futures::future::Either;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
 use libp2p::Transport as _;
-use libp2p::{
-    Multiaddr, PeerId,
-    identity::Keypair,
-    kad,
-    multiaddr::Protocol,
-    request_response::{
-        self, Config as RequestResponseConfig, ProtocolSupport, cbor::codec::Codec as CborCodec,
-    },
-    swarm::{StreamProtocol, Swarm},
-};
-use libp2p::{core::muxing::StreamMuxerBox, relay};
+use libp2p::core::muxing::StreamMuxerBox;
+use libp2p::identity::Keypair;
+use libp2p::kad;
+use libp2p::multiaddr::Protocol;
+use libp2p::relay;
+use libp2p::request_response::Config as RequestResponseConfig;
+use libp2p::request_response::ProtocolSupport;
+use libp2p::request_response::cbor::codec::Codec as CborCodec;
+use libp2p::request_response::{self};
+use libp2p::swarm::StreamProtocol;
+use libp2p::swarm::Swarm;
 #[cfg(feature = "open-metrics")]
 use prometheus_client::metrics::info::Info;
+use std::convert::TryInto;
+use std::fmt::Debug;
+use std::fs;
+use std::io::Read;
+use std::io::Write;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
 use std::time::Instant;
-use std::{
-    convert::TryInto,
-    fmt::Debug,
-    fs,
-    io::{Read, Write},
-    net::SocketAddr,
-    path::PathBuf,
-    time::Duration,
-};
 use tokio::sync::mpsc;
 
 // Timeout for requests sent/received through the request_response behaviour.
@@ -332,8 +344,8 @@ fn init_swarm_driver(
 
     // Identify Behaviour
     info!(
-            "Building Identify with identify_protocol_str: {identify_protocol_str:?} and identify_protocol_str: {identify_protocol_str:?}"
-        );
+        "Building Identify with identify_protocol_str: {identify_protocol_str:?} and identify_protocol_str: {identify_protocol_str:?}"
+    );
     let identify = {
         let cfg = libp2p::identify::Config::new(identify_protocol_str, config.keypair.public())
             .with_agent_version(agent_version)
@@ -512,7 +524,9 @@ pub(crate) fn init_reachability_check_swarm(
         .read()
         .expect("Failed to obtain read lock for IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR")
         .clone();
-    info!("Building Identify with identify_protocol_str: {identify_protocol_str:?} and identify_protocol_str: {identify_protocol_str:?}");
+    info!(
+        "Building Identify with identify_protocol_str: {identify_protocol_str:?} and identify_protocol_str: {identify_protocol_str:?}"
+    );
     let identify = {
         let cfg = libp2p::identify::Config::new(identify_protocol_str, config.keypair.public())
             .with_agent_version(agent_version)
@@ -582,7 +596,8 @@ fn check_and_wipe_storage_dir_if_necessary(
 #[cfg(test)]
 mod tests {
     use super::check_and_wipe_storage_dir_if_necessary;
-    use std::{fs, io::Read};
+    use std::fs;
+    use std::io::Read;
 
     #[tokio::test]
     async fn version_file_update() {

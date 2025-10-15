@@ -8,16 +8,21 @@
 
 use std::collections::BTreeMap;
 
-use ant_evm::{PaymentQuote, ProofOfPayment};
-use ant_protocol::{
-    NetworkAddress, PrettyPrintRecordKey,
-    messages::{Query, Response},
-    storage::{DataTypes, ValidationType},
-};
-use libp2p::kad::{Record, RecordKey};
-use libp2p::{Multiaddr, PeerId};
+use ant_evm::PaymentQuote;
+use ant_evm::ProofOfPayment;
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::messages::Query;
+use ant_protocol::messages::Response;
+use ant_protocol::storage::DataTypes;
+use ant_protocol::storage::ValidationType;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::kad::Record;
+use libp2p::kad::RecordKey;
 
-use crate::networking::{Addresses, driver::event::MsgResponder};
+use crate::networking::Addresses;
+use crate::networking::driver::event::MsgResponder;
 
 /// Events forwarded by the underlying Network; to be used by the upper layers
 pub(crate) enum NetworkEvent {

@@ -6,10 +6,16 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::networking::{
-    Addresses, CLOSE_GROUP_SIZE, NetworkError, Result, driver::PendingGetClosestType,
-};
-use libp2p::kad::{self, GetClosestPeersError, InboundRequest, K_VALUE, QueryResult};
+use crate::networking::Addresses;
+use crate::networking::CLOSE_GROUP_SIZE;
+use crate::networking::NetworkError;
+use crate::networking::Result;
+use crate::networking::driver::PendingGetClosestType;
+use libp2p::kad::GetClosestPeersError;
+use libp2p::kad::InboundRequest;
+use libp2p::kad::K_VALUE;
+use libp2p::kad::QueryResult;
+use libp2p::kad::{self};
 use std::collections::hash_map::Entry;
 use std::time::Instant;
 

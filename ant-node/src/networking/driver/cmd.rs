@@ -6,29 +6,38 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::networking::{
-    Addresses, CLOSE_GROUP_SIZE, NetworkEvent, NodeIssue, SwarmLocalState,
-    driver::{PendingGetClosestType, SwarmDriver, event::MsgResponder},
-    error::{NetworkError, Result},
-    interface::{LocalSwarmCmd, NetworkSwarmCmd, TerminateNodeReason},
-    log_markers::Marker,
-};
+use crate::networking::Addresses;
+use crate::networking::CLOSE_GROUP_SIZE;
+use crate::networking::NetworkEvent;
+use crate::networking::NodeIssue;
+use crate::networking::SwarmLocalState;
+use crate::networking::driver::PendingGetClosestType;
+use crate::networking::driver::SwarmDriver;
+use crate::networking::driver::event::MsgResponder;
+use crate::networking::error::NetworkError;
+use crate::networking::error::Result;
+use crate::networking::interface::LocalSwarmCmd;
+use crate::networking::interface::NetworkSwarmCmd;
+use crate::networking::interface::TerminateNodeReason;
+use crate::networking::log_markers::Marker;
 use ant_evm::PaymentQuote;
-use ant_protocol::{
-    NetworkAddress, PrettyPrintRecordKey,
-    messages::{Cmd, Request},
-    storage::{DataTypes, RecordHeader, RecordKind, ValidationType},
-};
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::messages::Cmd;
+use ant_protocol::messages::Request;
+use ant_protocol::storage::DataTypes;
+use ant_protocol::storage::RecordHeader;
+use ant_protocol::storage::RecordKind;
+use ant_protocol::storage::ValidationType;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::kad::KBucketDistance as Distance;
+use libp2p::kad::store::Error as StoreError;
+use libp2p::kad::store::RecordStore;
 use libp2p::multiaddr::Protocol;
-use libp2p::{
-    Multiaddr, PeerId,
-    kad::{
-        KBucketDistance as Distance,
-        store::{Error as StoreError, RecordStore},
-    },
-};
+use std::collections::BTreeMap;
+use std::time::Duration;
 use std::time::Instant;
-use std::{collections::BTreeMap, time::Duration};
 use tokio::sync::oneshot;
 use xor_name::XorName;
 

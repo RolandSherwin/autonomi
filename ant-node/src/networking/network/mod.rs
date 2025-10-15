@@ -6,28 +6,45 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use ant_evm::{PaymentQuote, QuotingMetrics};
-use ant_protocol::messages::{ConnectionInfo, Request, Response};
+use ant_evm::PaymentQuote;
+use ant_evm::QuotingMetrics;
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintKBucketKey;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::messages::ConnectionInfo;
+use ant_protocol::messages::Request;
+use ant_protocol::messages::Response;
 use ant_protocol::storage::ValidationType;
-use ant_protocol::{NetworkAddress, PrettyPrintKBucketKey, PrettyPrintRecordKey};
 use futures::future::select_all;
-use libp2p::kad::{K_VALUE, KBucketDistance, Record, RecordKey};
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::identity::Keypair;
+use libp2p::kad::K_VALUE;
+use libp2p::kad::KBucketDistance;
+use libp2p::kad::Record;
+use libp2p::kad::RecordKey;
 use libp2p::swarm::ConnectionId;
-use libp2p::{Multiaddr, PeerId, identity::Keypair};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use crate::networking::NetworkEvent;
 
+use super::Addresses;
+use super::NodeIssue;
+use super::SwarmLocalState;
 use super::driver::event::MsgResponder;
-use super::error::{NetworkError, Result};
-use super::interface::{LocalSwarmCmd, NetworkSwarmCmd};
-use super::{Addresses, NodeIssue, SwarmLocalState};
+use super::error::NetworkError;
+use super::error::Result;
+use super::interface::LocalSwarmCmd;
+use super::interface::NetworkSwarmCmd;
 
 mod init;
 
-pub(crate) use init::{init_reachability_check_swarm, NetworkConfig};
+pub(crate) use init::NetworkConfig;
+pub(crate) use init::init_reachability_check_swarm;
 
 #[derive(Clone, Debug)]
 /// API to interact with the underlying Swarm

@@ -17,34 +17,47 @@ mod log;
 mod rpc_service;
 mod subcommands;
 
-use crate::log::{reset_critical_failure, set_critical_failure};
+use crate::log::reset_critical_failure;
+use crate::log::set_critical_failure;
 use crate::subcommands::EvmNetworkCommand;
-use ant_bootstrap::{BootstrapCacheConfig, BootstrapCacheStore, InitialPeersConfig};
-use ant_evm::{EvmNetwork, RewardsAddress, get_evm_network};
+use ant_bootstrap::BootstrapCacheConfig;
+use ant_bootstrap::BootstrapCacheStore;
+use ant_bootstrap::InitialPeersConfig;
+use ant_evm::EvmNetwork;
+use ant_evm::RewardsAddress;
+use ant_evm::get_evm_network;
+use ant_logging::Level;
+use ant_logging::LogFormat;
+use ant_logging::LogOutputDest;
+use ant_logging::ReloadHandle;
 use ant_logging::metrics::init_metrics;
-use ant_logging::{Level, LogFormat, LogOutputDest, ReloadHandle};
-use ant_node::utils::{get_antnode_root_dir, get_root_dir_and_keypair};
-use ant_node::{Marker, NodeBuilder, NodeEvent, NodeEventsReceiver, ReachabilityStatus};
-use ant_protocol::{
-    node_rpc::{NodeCtrl, StopResult},
-    version,
-};
-use clap::{Parser, command};
-use color_eyre::{Result, eyre::eyre};
+use ant_node::Marker;
+use ant_node::NodeBuilder;
+use ant_node::NodeEvent;
+use ant_node::NodeEventsReceiver;
+use ant_node::ReachabilityStatus;
+use ant_node::utils::get_antnode_root_dir;
+use ant_node::utils::get_root_dir_and_keypair;
+use ant_protocol::node_rpc::NodeCtrl;
+use ant_protocol::node_rpc::StopResult;
+use ant_protocol::version;
+use clap::Parser;
+use clap::command;
+use color_eyre::Result;
+use color_eyre::eyre::eyre;
 use const_hex::traits::FromHex;
 use libp2p::PeerId;
-use std::{
-    env,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    path::PathBuf,
-    process::Command,
-    time::Duration,
-};
-use tokio::{
-    runtime::Runtime,
-    sync::{broadcast::error::RecvError, mpsc},
-    time::sleep,
-};
+use std::env;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::process::Command;
+use std::time::Duration;
+use tokio::runtime::Runtime;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
+use tokio::time::sleep;
 use tracing_appender::non_blocking::WorkerGuard;
 
 #[derive(Debug, Clone)]
@@ -405,14 +418,24 @@ async fn run_node(
                 node_builder.no_upnp(!upnp);
             }
             Ok(ReachabilityStatus::Reachable { addr, upnp }) => {
-                info!("Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}", addr.ip());
-                println!("Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}.", addr.ip());
+                info!(
+                    "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}",
+                    addr.ip()
+                );
+                println!(
+                    "Reachability check: Reachable. Starting node with socket addr: {} and UPnP: {upnp:?}.",
+                    addr.ip()
+                );
                 node_builder.no_upnp(!upnp);
                 node_builder.with_socket_addr(addr);
             }
             Ok(ReachabilityStatus::NotRoutable { .. }) => {
-                info!("Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node.");
-                println!("Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node.");
+                info!(
+                    "Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node."
+                );
+                println!(
+                    "Reachability check: NotRoutable. The node will be unreachable even with Relay mode. Terminating node."
+                );
                 return Err(eyre!(
                     "The node will be unreachable even with Relay mode. Terminating node."
                 ));

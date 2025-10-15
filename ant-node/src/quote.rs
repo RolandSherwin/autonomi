@@ -6,10 +6,16 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use crate::Error;
+use crate::Result;
 use crate::networking::Network;
-use crate::{Error, Result, node::Node};
-use ant_evm::{PaymentQuote, QuotingMetrics, RewardsAddress};
-use ant_protocol::{NetworkAddress, error::Error as ProtocolError, storage::ChunkAddress};
+use crate::node::Node;
+use ant_evm::PaymentQuote;
+use ant_evm::QuotingMetrics;
+use ant_evm::RewardsAddress;
+use ant_protocol::NetworkAddress;
+use ant_protocol::error::Error as ProtocolError;
+use ant_protocol::storage::ChunkAddress;
 use libp2p::PeerId;
 use std::time::Duration;
 use xor_name::XorName;

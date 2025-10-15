@@ -6,11 +6,15 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use crate::NodeBuilder;
+use crate::RunningNode;
 use crate::utils::get_root_dir_and_keypair;
-use crate::{NodeBuilder, RunningNode};
-pub use ant_evm::{EvmNetwork, RewardsAddress};
+pub use ant_evm::EvmNetwork;
+pub use ant_evm::RewardsAddress;
 pub use libp2p::Multiaddr;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]

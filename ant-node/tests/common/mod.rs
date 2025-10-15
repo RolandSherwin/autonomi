@@ -10,17 +10,24 @@
 pub mod client;
 
 use self::client::LocalNetwork;
-use ant_protocol::antnode_proto::{NodeInfoRequest, ant_node_client::AntNodeClient};
-use ant_service_management::{
-    NodeRegistryManager, antctl_proto::ant_ctl_client::AntCtlClient, get_local_node_registry_path,
-};
-use eyre::{OptionExt, Result, bail, eyre};
+use ant_protocol::antnode_proto::NodeInfoRequest;
+use ant_protocol::antnode_proto::ant_node_client::AntNodeClient;
+use ant_service_management::NodeRegistryManager;
+use ant_service_management::antctl_proto::ant_ctl_client::AntCtlClient;
+use ant_service_management::get_local_node_registry_path;
+use eyre::OptionExt;
+use eyre::Result;
+use eyre::bail;
+use eyre::eyre;
 use itertools::Either;
 use libp2p::PeerId;
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
+use std::time::Duration;
 use test_utils::testnet::DeploymentInventory;
 use tonic::Request;
-use tracing::{debug, error, warn};
+use tracing::debug;
+use tracing::error;
+use tracing::warn;
 
 // type ResultRandomContent = Result<(FilesApi, Bytes, ChunkAddress, Vec<(XorName, PathBuf)>)>;
 
