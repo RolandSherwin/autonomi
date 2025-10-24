@@ -15,6 +15,7 @@ use ant_bootstrap::BootstrapCacheStore;
 use event::NodeEvent;
 use network_discovery::{NETWORK_DISCOVER_INTERVAL, NetworkDiscovery};
 
+use crate::networking::driver::behaviour::upnp;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
 use crate::networking::{
@@ -91,7 +92,7 @@ pub(super) struct NodeBehaviour {
         libp2p::allow_block_list::Behaviour<libp2p::allow_block_list::BlockedPeers>,
     pub(super) do_not_disturb: behaviour::do_not_disturb::Behaviour,
     pub(super) identify: libp2p::identify::Behaviour,
-    pub(super) upnp: Toggle<libp2p::upnp::tokio::Behaviour>,
+    pub(super) upnp: Toggle<upnp::behaviour::Behaviour>,
     pub(super) kademlia: kad::Behaviour<NodeRecordStore>,
     pub(super) request_response: request_response::cbor::Behaviour<Request, Response>,
 }

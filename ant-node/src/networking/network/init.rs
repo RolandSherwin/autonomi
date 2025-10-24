@@ -12,7 +12,8 @@ use crate::networking::{
     CLOSE_GROUP_SIZE, NetworkEvent,
     circular_vec::CircularVec,
     driver::{
-        InitialBootstrapTrigger, NodeBehaviour, SwarmDriver, network_discovery::NetworkDiscovery,
+        InitialBootstrapTrigger, NodeBehaviour, SwarmDriver, behaviour::upnp,
+        network_discovery::NetworkDiscovery,
     },
     error::{NetworkError, Result},
     record_store::{NodeRecordStore, NodeRecordStoreConfig},
@@ -312,7 +313,7 @@ fn init_swarm_driver(
 
     let upnp = if !config.local && !config.no_upnp {
         debug!("Enabling UPnP port opening behavior");
-        Some(libp2p::upnp::tokio::Behaviour::default())
+        Some(upnp::behaviour::Behaviour::default())
     } else {
         None
     }
