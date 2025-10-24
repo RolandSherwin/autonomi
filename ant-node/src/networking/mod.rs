@@ -24,6 +24,8 @@ mod transport;
 
 // re-export arch dependent deps for use in the crate, or above
 pub use self::interface::SwarmLocalState;
+pub use self::reachability_check::ReachabilityIssue;
+pub use self::reachability_check::ReachabilityStatus;
 pub(crate) use self::{
     error::NetworkError,
     interface::{NetworkEvent, NodeIssue},
@@ -118,6 +120,13 @@ pub(crate) fn multiaddr_pop_p2p(addr: &mut Multiaddr) -> Option<PeerId> {
 pub(crate) fn multiaddr_get_p2p(addr: &Multiaddr) -> Option<PeerId> {
     addr.iter().find_map(|p| match p {
         Protocol::P2p(peer_id) => Some(peer_id),
+        _ => None,
+    })
+}
+
+pub(crate) fn multiaddr_get_ip(addr: &Multiaddr) -> Option<std::net::IpAddr> {
+    addr.iter().find_map(|p| match p {
+        Protocol::Ip4(ipv4) => Some(std::net::IpAddr::V4(ipv4)),
         _ => None,
     })
 }
