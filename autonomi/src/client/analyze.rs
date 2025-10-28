@@ -6,12 +6,10 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use ant_protocol::storage::{PointerTarget, ScratchpadAddress};
-use self_encryption::{ChunkInfo, DataMap};
-
 use crate::{
     Bytes, Client, PublicKey,
     chunk::{Chunk, ChunkAddress, DataMapChunk},
+    client::config::CHUNK_DOWNLOAD_BATCH_SIZE,
     files::{PrivateArchive, PublicArchive},
     graph::{GraphEntry, GraphEntryAddress},
     pointer::{Pointer, PointerAddress},
@@ -19,6 +17,14 @@ use crate::{
     scratchpad::Scratchpad,
     self_encryption::DataMapLevel,
 };
+use ant_protocol::storage::PointerTarget;
+use ant_protocol::storage::ScratchpadAddress;
+use futures::stream;
+use futures::stream::StreamExt;
+use self_encryption::ChunkInfo;
+use self_encryption::DataMap;
+use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use super::{GetError, register::RegisterAddress};
 const MAX_HEX_PRINT_LENGTH: usize = 4 * 1024;
@@ -215,6 +221,81 @@ impl Client {
         }
 
         Err(AnalysisError::UnrecognizedInput)
+    }
+
+    /// Analyze an address recursively by following all discovered addresses. Returns the list of analyses found.
+    /// Can be run in verbose mode to make it talkative (will print information as it works).
+    pub async fn analyze_address_recursively(
+        &self,
+        address: &str,
+        verbose: bool,
+    ) -> HashMap<String, Result<Analysis, AnalysisError>> {
+        macro_rules! println_if_verbose {
+            ($($arg:tt)*) => {
+                if verbose {
+                    println!($($arg)*);
+                }
+            };
+        }
+
+        let mut results = HashMap::new();
+        let mut to_process: VecDeque<String> = VecDeque::new();
+        to_process.push_back(address.to_string());
+
+        while !to_process.is_empty() {
+            // Take addresses to process in this batch
+            let batch: Vec<String> = to_process
+                .drain(..)
+                .filter(|addr| !results.contains_key(addr))
+                .collect();
+
+            if batch.is_empty() {
+                break;
+            }
+            println_if_verbose!("Processing batch of {} addresses", batch.len());
+
+            // Create futures for the batch
+            let analyze_tasks = batch.into_iter().map(|addr| {
+                let client = self.clone();
+                async move {
+                    println_if_verbose!("Analyzing address: {addr}");
+                    let analysis = client.analyze_address(&addr, false).await;
+
+                    let referenced_addrs = if let Ok(ref analysis_result) = analysis {
+                        let addrs = extract_addresses(analysis_result);
+                        if !addrs.is_empty() {
+                            println_if_verbose!(
+                                "Found {} referenced addresses from {addr}",
+                                addrs.len(),
+                            );
+                        }
+                        addrs
+                    } else {
+                        Vec::new()
+                    };
+
+                    (addr, analysis, referenced_addrs)
+                }
+            });
+            let batch_results: Vec<_> = stream::iter(analyze_tasks)
+                .buffered(*CHUNK_DOWNLOAD_BATCH_SIZE)
+                .collect()
+                .await;
+
+            // Process results
+            for (addr, analysis, referenced_addrs) in batch_results {
+                results.insert(addr, analysis);
+
+                // Add new addresses to process
+                for ref_addr in referenced_addrs {
+                    if !results.contains_key(&ref_addr) && !to_process.contains(&ref_addr) {
+                        to_process.push_back(ref_addr);
+                    }
+                }
+            }
+        }
+
+        results
     }
 
     /// Analyze an address and return the address type (Chunk, Pointer, GraphEntry, Scratchpad)
@@ -624,6 +705,46 @@ fn data_hex(data: &Bytes) -> String {
     } else {
         format!("[{} bytes of data]", data.len())
     }
+}
+
+fn extract_addresses(analysis: &Analysis) -> Vec<String> {
+    let mut addresses = Vec::new();
+
+    match analysis {
+        Analysis::Chunk(_) => {
+            // Raw chunks don't reference other addresses
+        }
+        Analysis::GraphEntry(graph_entry) => {
+            // Extract descendant public keys from graph entry
+            for (public_key, _content) in graph_entry.descendants.iter() {
+                addresses.push(public_key.to_hex());
+            }
+        }
+        Analysis::Pointer(pointer) => {
+            // Extract the target address
+            addresses.push(pointer.target().to_hex());
+        }
+        Analysis::Scratchpad(_) => {
+            // Scratchpads don't point to other data
+        }
+        Analysis::Register { .. } => {
+            // Registers don't point to other data
+        }
+        Analysis::DataMap { chunks, .. } | Analysis::RawDataMap { chunks, .. } => {
+            // Extract all chunk addresses
+            for chunk_addr in chunks {
+                addresses.push(chunk_addr.to_hex());
+            }
+        }
+        Analysis::PublicArchive { .. } => {
+            // Archives don't point to other data
+        }
+        Analysis::PrivateArchive(_) => {
+            // Archives don't point to other data
+        }
+    }
+
+    addresses
 }
 
 #[cfg(test)]

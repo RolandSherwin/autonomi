@@ -19,6 +19,7 @@ pub async fn analyze(
     closest_nodes: bool,
     verbose: bool,
     network_context: NetworkContext,
+    recursive: bool,
 ) -> Result<()> {
     macro_rules! println_if_verbose {
         ($($arg:tt)*) => {
@@ -27,7 +28,7 @@ pub async fn analyze(
             }
         };
     }
-    println_if_verbose!("Analyzing address: {}", addr);
+    println_if_verbose!("Analyzing address: {addr}");
 
     // then connect to network and check data
     let client = crate::actions::connect_to_network(network_context)
@@ -38,21 +39,37 @@ pub async fn analyze(
         print_closest_nodes(&client, addr, verbose).await?;
     }
 
-    let analysis = client.analyze_address(addr, verbose).await;
-    match analysis {
-        Ok(analysis) => {
-            println_if_verbose!("Analysis successful");
-            println!("{analysis}");
-        }
-        Err(AnalysisError::UnrecognizedInput) => {
-            println!("🚨 Could not identify address type!");
-            println_if_verbose!(
-                "Provided string was not recognized as a data address, trying other types..."
-            );
-            try_other_types(addr, verbose);
-        }
-        Err(e) => {
-            println!("Analysis inconclusive: {e}");
+    let results = if recursive {
+        println_if_verbose!("Starting recursive analysis...");
+        client.analyze_address_recursively(addr, verbose).await
+    } else {
+        let mut map = std::collections::HashMap::new();
+        let analysis = client.analyze_address(addr, verbose).await;
+        map.insert(addr.to_string(), analysis);
+        map
+    };
+
+    // Print results
+    if recursive && results.len() > 1 {
+        print_recursive_summary(&results, verbose);
+    } else {
+        if let Some((_, analysis)) = results.iter().next() {
+            match analysis {
+                Ok(analysis) => {
+                    println_if_verbose!("Analysis successful");
+                    println!("{analysis}");
+                }
+                Err(AnalysisError::UnrecognizedInput) => {
+                    println!("🚨 Could not identify address type!");
+                    println_if_verbose!(
+                        "Provided string was not recognized as a data address, trying other types..."
+                    );
+                    try_other_types(addr, verbose);
+                }
+                Err(e) => {
+                    println!("Analysis inconclusive: {e}");
+                }
+            }
         }
     }
 
@@ -195,4 +212,54 @@ async fn print_closest_nodes(client: &autonomi::Client, addr: &str, verbose: boo
     }
 
     Ok(())
+}
+
+fn print_recursive_summary(
+    results: &std::collections::HashMap<
+        String,
+        Result<autonomi::client::analyze::Analysis, AnalysisError>,
+    >,
+    verbose: bool,
+) {
+    use autonomi::client::analyze::Analysis;
+
+    println!("\n{:<70} | {:<15} | Status", "Address", "Type");
+    println!("{}", "─".repeat(95));
+
+    for (address, result) in results {
+        let (type_name, status) = match result {
+            Ok(analysis) => {
+                let type_str = match analysis {
+                    Analysis::Chunk(_) => "Chunk",
+                    Analysis::GraphEntry(_) => "GraphEntry",
+                    Analysis::Pointer(_) => "Pointer",
+                    Analysis::Scratchpad(_) => "Scratchpad",
+                    Analysis::Register { .. } => "Register",
+                    Analysis::DataMap { .. } => "DataMap",
+                    Analysis::RawDataMap { .. } => "RawDataMap",
+                    Analysis::PublicArchive { .. } => "PublicArchive",
+                    Analysis::PrivateArchive(_) => "PrivateArchive",
+                };
+                (type_str, "✓ Found")
+            }
+            Err(_) => ("Unknown", "✗ Not found"),
+        };
+
+        println!("{address:<70} | {type_name:<15} | {status}");
+    }
+
+    println!("\nTotal: {} addresses", results.len());
+
+    if verbose {
+        println!("\n{}", "═".repeat(95));
+        println!("Detailed results:\n");
+        for (address, result) in results {
+            println!("Address: {address}");
+            match result {
+                Ok(analysis) => println!("{analysis}"),
+                Err(e) => println!("Error: {e}"),
+            }
+            println!();
+        }
+    }
 }
