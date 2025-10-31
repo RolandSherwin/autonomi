@@ -6,16 +6,19 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::networking::{
-    Addresses, NetworkEvent, multiaddr_get_port, network::connection_action_logging,
-};
+use crate::networking::Addresses;
+use crate::networking::NetworkEvent;
+use crate::networking::multiaddr_get_port;
+use crate::networking::network::connection_action_logging;
 use ant_protocol::version::IDENTIFY_PROTOCOL_STR;
 use libp2p::Multiaddr;
 use libp2p::identify::Info;
 use libp2p::kad::K_VALUE;
 use libp2p::multiaddr::Protocol;
-use std::collections::{HashSet, hash_map};
-use std::time::{Duration, Instant};
+use std::collections::HashSet;
+use std::collections::hash_map;
+use std::time::Duration;
+use std::time::Instant;
 
 /// The delay before we dial back a peer after receiving an identify event.
 /// 180s will most likely remove the UDP tuple from the remote's NAT table.
@@ -295,6 +298,7 @@ impl SwarmDriver {
                 warn!("Peer {peer_id:?} is not part of the RT. Cannot update addresses.");
                 return;
             };
+
             let existing_addrs = entry
                 .node
                 .value
@@ -329,8 +333,12 @@ fn does_the_peer_support_dnd(info: &Info) -> bool {
 }
 
 /// Craft valid multiaddr like /ip4/68.183.39.80/udp/31055/quic-v1
-/// RelayManager::craft_relay_address for relayed addr. This is for non-relayed addr.
 fn craft_valid_multiaddr_without_p2p(addr: &Multiaddr) -> Option<Multiaddr> {
+    if addr.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+        debug!("Skipping crafting multiaddr for relay node: {addr:?}");
+        return None;
+    }
+
     let mut new_multiaddr = Multiaddr::empty();
     let ip = addr.iter().find_map(|p| match p {
         Protocol::Ip4(addr) => Some(addr),
@@ -346,29 +354,9 @@ fn craft_valid_multiaddr_without_p2p(addr: &Multiaddr) -> Option<Multiaddr> {
 }
 
 /// Build a `Multiaddr` with the p2p protocol filtered out.
-/// If it is a relayed address, then the relay's P2P address is preserved.
 fn multiaddr_strip_p2p(multiaddr: &Multiaddr) -> Multiaddr {
-    let is_relayed = multiaddr.iter().any(|p| matches!(p, Protocol::P2pCircuit));
-
-    if is_relayed {
-        // Do not add any PeerId after we've found the P2PCircuit protocol. The prior one is the relay's PeerId which
-        // we should preserve.
-        let mut before_relay_protocol = true;
-        let mut new_multi_addr = Multiaddr::empty();
-        for p in multiaddr.iter() {
-            if matches!(p, Protocol::P2pCircuit) {
-                before_relay_protocol = false;
-            }
-            if matches!(p, Protocol::P2p(_)) && !before_relay_protocol {
-                continue;
-            }
-            new_multi_addr.push(p);
-        }
-        new_multi_addr
-    } else {
-        multiaddr
-            .iter()
-            .filter(|p| !matches!(p, Protocol::P2p(_)))
-            .collect()
-    }
+    multiaddr
+        .iter()
+        .filter(|p| !matches!(p, Protocol::P2p(_)))
+        .collect()
 }

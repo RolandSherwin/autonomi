@@ -6,27 +6,33 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-// Implementation to record `libp2p::upnp::Event` metrics
 mod bad_node;
+mod metadata;
 mod reachability_check;
 mod relay_client;
 pub(super) mod service;
 mod upnp;
 
+use crate::ReachabilityStatus;
+use crate::networking::MetricsRegistries;
 use crate::networking::log_markers::Marker;
-use crate::networking::{MetricsRegistries, reachability_check::ReachabilityStatus};
-use bad_node::{BadNodeMetrics, BadNodeMetricsMsg, TimeFrame};
-use libp2p::{
-    PeerId,
-    metrics::{Metrics as Libp2pMetrics, Recorder},
-};
-use prometheus_client::{
-    encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family, gauge::Gauge},
-};
+use bad_node::BadNodeMetrics;
+use bad_node::BadNodeMetricsMsg;
+use bad_node::TimeFrame;
+use libp2p::PeerId;
+use libp2p::metrics::Metrics as Libp2pMetrics;
+use libp2p::metrics::Recorder;
+pub(crate) use metadata::MetadataExtendedRecorder;
+pub(crate) use metadata::MetadataRecorder;
+use prometheus_client::encoding::EncodeLabelSet;
+use prometheus_client::metrics::counter::Counter;
+use prometheus_client::metrics::family::Family;
+use prometheus_client::metrics::gauge::Gauge;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
-use sysinfo::{Pid, ProcessRefreshKind, System};
+use sysinfo::Pid;
+use sysinfo::ProcessRefreshKind;
+use sysinfo::System;
 use tokio::time::Duration;
 use tokio::time::sleep;
 

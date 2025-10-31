@@ -6,29 +6,29 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use super::NodeEvent;
 use super::SwarmDriver;
-use crate::networking::{
-    NetworkEvent, NodeIssue, Result,
-    driver::behaviour::upnp,
-    endpoint_str,
-    error::{dial_error_to_str, listen_error_to_str},
-    interface::TerminateNodeReason,
-};
+use crate::event::TerminateNodeReason;
+use crate::networking::NetworkEvent;
+use crate::networking::NodeIssue;
+use crate::networking::Result;
+use crate::networking::driver::behaviour::upnp;
+use crate::networking::error::dial_error_to_str;
+use crate::networking::error::listen_error_to_str;
+use crate::networking::network::endpoint_str;
 use itertools::Itertools;
+use libp2p::Multiaddr;
+use libp2p::TransportError;
 #[cfg(feature = "open-metrics")]
 use libp2p::metrics::Recorder;
-use libp2p::{
-    Multiaddr, TransportError,
-    multiaddr::Protocol,
-    swarm::{
-        ConnectionId, DialError, SwarmEvent,
-        dial_opts::{DialOpts, PeerCondition},
-    },
-};
+use libp2p::multiaddr::Protocol;
+use libp2p::swarm::ConnectionId;
+use libp2p::swarm::DialError;
+use libp2p::swarm::SwarmEvent;
+use libp2p::swarm::dial_opts::DialOpts;
+use libp2p::swarm::dial_opts::PeerCondition;
 use std::time::Instant;
 use tokio::time::Duration;
-
-use super::NodeEvent;
 
 impl SwarmDriver {
     /// Handle `SwarmEvents`
@@ -78,14 +78,14 @@ impl SwarmDriver {
                         );
                         self.initial_bootstrap_trigger.upnp_gateway_result_obtained = true;
                     }
+                    upnp::behaviour::Event::NonRoutableGateway => {
+                        warn!("UPnP gateway is not routable");
+                        self.initial_bootstrap_trigger.upnp_gateway_result_obtained = true;
+                    }
                     upnp::behaviour::Event::ExpiredExternalAddr { addr, local_addr } => {
                         warn!(
                             "UPnP: External address mapping expired: {addr:?} from local address: {local_addr:?}"
                         );
-                    }
-                    upnp::behaviour::Event::NonRoutableGateway => {
-                        warn!("UPnP gateway is not routable");
-                        self.initial_bootstrap_trigger.upnp_gateway_result_obtained = true;
                     }
                 }
             }
@@ -126,6 +126,7 @@ impl SwarmDriver {
                 {
                     warn!("Failed to sync and flush cache during NewListenAddr: {err:?}");
                 }
+
                 self.initial_bootstrap_trigger.listen_addr_obtained = true;
 
                 self.send_event(NetworkEvent::NewListenAddr(address));
@@ -139,6 +140,7 @@ impl SwarmDriver {
                 info!(
                     "Listener {listener_id:?} with add {addresses:?} has been closed for {reason:?}"
                 );
+                self.send_event(NetworkEvent::ExpiredListenAddresses(addresses));
             }
             SwarmEvent::IncomingConnection {
                 connection_id,

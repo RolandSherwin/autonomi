@@ -6,18 +6,22 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
+use crate::event::TerminateNodeReason;
+use crate::networking::Addresses;
+use crate::networking::driver::event::MsgResponder;
+use ant_evm::PaymentQuote;
+use ant_evm::ProofOfPayment;
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::messages::Query;
+use ant_protocol::messages::Response;
+use ant_protocol::storage::DataTypes;
+use ant_protocol::storage::ValidationType;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::kad::Record;
+use libp2p::kad::RecordKey;
 use std::collections::BTreeMap;
-
-use ant_evm::{PaymentQuote, ProofOfPayment};
-use ant_protocol::{
-    NetworkAddress, PrettyPrintRecordKey,
-    messages::{Query, Response},
-    storage::{DataTypes, ValidationType},
-};
-use libp2p::kad::{Record, RecordKey};
-use libp2p::{Multiaddr, PeerId};
-
-use crate::networking::{Addresses, driver::event::MsgResponder};
 
 /// Events forwarded by the underlying Network; to be used by the upper layers
 pub(crate) enum NetworkEvent {
@@ -46,6 +50,8 @@ pub(crate) enum NetworkEvent {
     KeysToFetchForReplication(Vec<(PeerId, RecordKey)>),
     /// Started listening on a new address
     NewListenAddr(Multiaddr),
+    /// Stopped listening on an address
+    ExpiredListenAddresses(Vec<Multiaddr>),
     /// Report unverified record
     UnverifiedRecord(Record),
     /// Terminate Node on unrecoverable errors
@@ -67,13 +73,6 @@ pub(crate) enum NetworkEvent {
     },
     /// Peers of picked bucket for version query.
     PeersForVersionQuery(Vec<(PeerId, Addresses)>),
-}
-
-/// Terminate node for the following reason
-#[derive(Debug, Clone)]
-pub(crate) enum TerminateNodeReason {
-    HardDiskWriteError,
-    UpnpGatewayNotFound,
 }
 
 // Manually implement Debug as `#[debug(with = "unverified_record_fmt")]` not working as expected.
@@ -110,6 +109,9 @@ impl std::fmt::Debug for NetworkEvent {
             }
             NetworkEvent::NewListenAddr(addr) => {
                 write!(f, "NetworkEvent::NewListenAddr({addr:?})")
+            }
+            NetworkEvent::ExpiredListenAddresses(addrs) => {
+                write!(f, "NetworkEvent::ExpiredListenAddresses({addrs:?})")
             }
             NetworkEvent::UnverifiedRecord(record) => {
                 let pretty_key = PrettyPrintRecordKey::from(&record.key);
@@ -149,22 +151,6 @@ impl std::fmt::Debug for NetworkEvent {
                         .iter()
                         .map(|(peer, _addrs)| peer)
                         .collect::<Vec<&PeerId>>()
-                )
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for TerminateNodeReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TerminateNodeReason::HardDiskWriteError => {
-                write!(f, "HardDiskWriteError")
-            }
-            TerminateNodeReason::UpnpGatewayNotFound => {
-                write!(
-                    f,
-                    "UPnP gateway not found. Enable UPnP on your router to allow incoming connections or manually port forward."
                 )
             }
         }

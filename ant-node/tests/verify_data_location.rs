@@ -12,31 +12,36 @@ mod common;
 
 use ant_logging::LogBuilder;
 use ant_node::sort_peers_by_key;
-use ant_protocol::{
-    CLOSE_GROUP_SIZE, NetworkAddress, PrettyPrintRecordKey,
-    antnode_proto::{NodeInfoRequest, RecordAddressesRequest},
-};
+use ant_protocol::CLOSE_GROUP_SIZE;
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::antnode_proto::NodeInfoRequest;
+use ant_protocol::antnode_proto::RecordAddressesRequest;
 use autonomi::Client;
 use bytes::Bytes;
-use common::{
-    NodeRestart,
-    client::{get_all_rpc_addresses, get_client_and_funded_wallet},
-    get_all_peer_ids, get_antnode_rpc_client,
-};
-use eyre::{Result, eyre};
+use common::NodeRestart;
+use common::client::get_all_rpc_addresses;
+use common::client::get_client_and_funded_wallet;
+use common::get_all_peer_ids;
+use common::get_antnode_rpc_client;
+use eyre::Result;
+use eyre::eyre;
 use itertools::Itertools;
-use libp2p::{
-    PeerId,
-    kad::{KBucketKey, RecordKey},
-};
-use rand::{Rng, rngs::OsRng};
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use libp2p::PeerId;
+use libp2p::kad::KBucketKey;
+use libp2p::kad::RecordKey;
+use rand::Rng;
+use rand::rngs::OsRng;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::net::SocketAddr;
+use std::time::Duration;
+use std::time::Instant;
 use tonic::Request;
-use tracing::{debug, error, info};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
 
 const CHUNK_SIZE: usize = 1024;
 

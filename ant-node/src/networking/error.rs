@@ -6,16 +6,18 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use ant_protocol::storage::GraphEntryAddress;
-use ant_protocol::{NetworkAddress, messages::Response, storage::RecordKind};
+use ant_protocol::messages::Response;
+use libp2p::TransportError;
+use libp2p::kad;
+use libp2p::kad::QueryId;
+use libp2p::request_response::OutboundFailure;
+use libp2p::request_response::OutboundRequestId;
+use libp2p::swarm::DialError;
 use libp2p::swarm::ListenError;
-use libp2p::{
-    TransportError,
-    kad::{self, QueryId},
-    request_response::{OutboundFailure, OutboundRequestId},
-    swarm::DialError,
-};
-use std::{collections::HashMap, fmt::Debug, io, path::PathBuf};
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::io;
+use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::Level;
@@ -51,6 +53,9 @@ pub enum NetworkError {
     #[error("Failed to sign the message with the PeerId keypair")]
     SigningFailed(#[from] libp2p::identity::SigningError),
 
+    #[error("Not enough bootstrap addresses provided")]
+    NotEnoughBootstrapAddresses,
+
     #[error("No listen addresses found")]
     NoListenAddressesFound,
 
@@ -61,34 +66,10 @@ pub enum NetworkError {
     ListenFailed(libp2p::core::multiaddr::Multiaddr),
 
     // ---------- Record Errors
-    #[error("Record not stored by nodes, it could be invalid, else you should retry: {0:?}")]
-    RecordNotStoredByNodes(NetworkAddress),
-
-    // The RecordKind that was obtained did not match with the expected one
-    #[error("The RecordKind obtained from the Record did not match with the expected kind: {0}")]
-    RecordKindMismatch(RecordKind),
-
     #[error("Record header is incorrect")]
     InCorrectRecordHeader,
 
-    #[error("The operation is not allowed on a client record store")]
-    OperationNotAllowedOnClientRecordStore,
-
-    // ---------- Chunk Errors
-    #[error("Failed to verify the ChunkProof with the provided quorum")]
-    FailedToVerifyChunkProof(NetworkAddress),
-
-    // ---------- Graph Errors
-    #[error("Graph entry not found: {0:?}")]
-    NoGraphEntryFoundInsideRecord(GraphEntryAddress),
-
     // ---------- Store Error
-    #[error("Not Enough Peers for Store Cost Request")]
-    NotEnoughPeersForStoreCostRequest,
-
-    #[error("No Store Cost Responses")]
-    NoStoreCostResponses,
-
     #[error("Could not create storage dir: {path:?}, error: {source}")]
     FailedToCreateRecordStoreDir {
         path: PathBuf,
@@ -125,9 +106,6 @@ pub enum NetworkError {
 
     #[error("Outgoing response has been dropped due to a conn being closed or timeout: {0}")]
     OutgoingResponseDropped(Response),
-
-    #[error("Error setting up behaviour: {0}")]
-    BehaviourErr(String),
 }
 
 /// Return a list of error strings for the DialError type
@@ -229,9 +207,10 @@ fn transport_err_to_str(err: &TransportError<std::io::Error>) -> (String, Level)
 
 #[cfg(test)]
 mod tests {
-    use ant_protocol::{
-        NetworkAddress, PrettyPrintKBucketKey, PrettyPrintRecordKey, storage::ChunkAddress,
-    };
+    use ant_protocol::NetworkAddress;
+    use ant_protocol::PrettyPrintKBucketKey;
+    use ant_protocol::PrettyPrintRecordKey;
+    use ant_protocol::storage::ChunkAddress;
     use xor_name::XorName;
 
     #[test]

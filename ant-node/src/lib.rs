@@ -27,12 +27,14 @@
 #[macro_use]
 extern crate tracing;
 
+mod critical_failure;
 mod error;
 mod event;
+mod listen_addr_writer;
 mod log_markers;
 #[cfg(feature = "open-metrics")]
 mod metrics;
-mod networking;
+pub mod networking;
 mod node;
 mod put_validation;
 #[cfg(feature = "extension-module")]
@@ -44,28 +46,35 @@ pub mod spawn;
 #[allow(missing_docs)]
 pub mod utils;
 
+pub use self::critical_failure::reset_critical_failure;
+pub use self::critical_failure::set_critical_failure;
+pub use self::error::Error;
+pub use self::error::PutValidationError;
+pub use self::event::NodeEvent;
+pub use self::event::NodeEventsChannel;
+pub use self::event::NodeEventsReceiver;
+pub use self::log_markers::Marker;
 pub use self::networking::ReachabilityIssue;
 pub use self::networking::ReachabilityStatus;
-pub use self::{
-    error::{Error, PutValidationError},
-    event::{NodeEvent, NodeEventsChannel, NodeEventsReceiver},
-    log_markers::Marker,
-    networking::sort_peers_by_key,
-    node::{NodeBuilder, PERIODIC_REPLICATION_INTERVAL_MAX_S},
-};
-pub use ant_bootstrap::{Bootstrap, BootstrapCacheStore, BootstrapConfig, InitialPeersConfig};
+pub use self::networking::sort_peers_by_key;
+pub use self::node::NodeBuilder;
+pub use self::node::PERIODIC_REPLICATION_INTERVAL_MAX_S;
+pub use ant_bootstrap::Bootstrap;
+pub use ant_bootstrap::BootstrapCacheStore;
+pub use ant_bootstrap::BootstrapConfig;
+pub use ant_bootstrap::InitialPeersConfig;
 
 use crate::error::Result;
-
 use crate::networking::Network;
 pub use crate::networking::SwarmLocalState;
 use ant_evm::RewardsAddress;
-use ant_protocol::{NetworkAddress, get_port_from_multiaddr};
-use libp2p::{Multiaddr, PeerId};
-use std::{
-    collections::{BTreeMap, HashSet},
-    path::PathBuf,
-};
+use ant_protocol::NetworkAddress;
+use ant_protocol::get_port_from_multiaddr;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use std::collections::BTreeMap;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use tokio::sync::watch;
 
 /// Once a node is started and running, the user obtains
@@ -73,6 +82,9 @@ use tokio::sync::watch;
 #[derive(Clone)]
 pub struct RunningNode {
     shutdown_sender: watch::Sender<bool>,
+    #[allow(dead_code)]
+    /// This has to be kept for the lifetime of the node, so that the metrics server can be kept running.
+    metrics_server_shutdown_sender: Option<watch::Sender<bool>>,
     network: Network,
     node_events_channel: NodeEventsChannel,
     root_dir_path: PathBuf,

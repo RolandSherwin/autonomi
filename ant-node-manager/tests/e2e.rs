@@ -31,15 +31,23 @@ const ANTNODE_BIN_NAME: &str = "antnode.exe";
 /// the process. However, there seems to be some sort of issue with adding user accounts on the GHA
 /// build agent, so we will just tell it to use the `runner` user, which is the account for the
 /// build agent.
+///
+/// This test is ignored by default to prevent accidental execution on developer machines.
+/// In CI, it runs via `cargo test -- --ignored` (see .github/workflows/node_man_tests.yml).
+/// Developers can run it manually with `cargo test --test e2e -- --ignored` if needed.
 #[test]
+#[ignore]
 fn cross_platform_service_install_and_control() {
     let antnode_path = PathBuf::from("..")
         .join("target")
         .join("release")
         .join(ANTNODE_BIN_NAME);
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("add")
-        .arg("--local")
+    let output = cmd
+        .arg("--trace")
+        .arg("add")
+        .arg("--skip-reachability-check")
+        .arg("--no-upnp")
         .arg("--user")
         .arg(CI_USER)
         .arg("--count")
@@ -49,8 +57,13 @@ fn cross_platform_service_install_and_control() {
         .arg("--rewards-address")
         .arg("0x06C4E523ebf30bc76DE246f10FBcECb4cc39D11a")
         .arg("evm-arbitrum-sepolia-test")
-        .assert()
-        .success();
+        .output()
+        .expect("Failed to add services");
+
+    println!("--- Add Output ---");
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success());
 
     let registry = get_status();
 
@@ -66,7 +79,7 @@ fn cross_platform_service_install_and_control() {
 
     // Start each of the three services.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("start").assert().success();
+    cmd.arg("--trace").arg("start").assert().success();
 
     // After `start`, all services should be running with valid peer IDs assigned.
     let registry = get_status();
@@ -86,7 +99,7 @@ fn cross_platform_service_install_and_control() {
 
     // Stop each of the three services.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("stop").assert().success();
+    cmd.arg("--trace").arg("stop").assert().success();
 
     // After `stop`, all services should be stopped with peer IDs retained.
     let registry = get_status();
@@ -102,7 +115,7 @@ fn cross_platform_service_install_and_control() {
 
     // Start each of the three services again.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("start").assert().success();
+    cmd.arg("--trace").arg("start").assert().success();
 
     // Peer IDs again should be retained after restart.
     let registry = get_status();
@@ -118,7 +131,8 @@ fn cross_platform_service_install_and_control() {
 
     // Stop two nodes by peer ID.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("stop")
+    cmd.arg("--trace")
+        .arg("stop")
         .arg("--peer-id")
         .arg(registry.nodes[0].peer_id.unwrap().to_string())
         .arg("--peer-id")
@@ -140,7 +154,8 @@ fn cross_platform_service_install_and_control() {
 
     // Now restart the stopped nodes by service name.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("start")
+    cmd.arg("--trace")
+        .arg("start")
         .arg("--service-name")
         .arg(registry.nodes[0].service_name.clone())
         .arg("--service-name")
@@ -162,7 +177,7 @@ fn cross_platform_service_install_and_control() {
 
     // Finally, stop each of the three services.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("stop").assert().success();
+    cmd.arg("--trace").arg("stop").assert().success();
 
     // After `stop`, all services should be stopped with peer IDs retained.
     let registry = get_status();
@@ -178,7 +193,8 @@ fn cross_platform_service_install_and_control() {
 
     // Remove two nodes.
     let mut cmd = Command::cargo_bin("antctl").unwrap();
-    cmd.arg("remove")
+    cmd.arg("--trace")
+        .arg("remove")
         .arg("--service-name")
         .arg(registry.nodes[0].service_name.clone())
         .arg("--service-name")
@@ -211,6 +227,11 @@ fn get_status() -> StatusSummary {
         .arg("--json")
         .output()
         .expect("Could not retrieve service status");
+
+    println!("--- Service Status Output ---");
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+
     let output = String::from_utf8_lossy(&output.stdout).to_string();
     serde_json::from_str(&output).unwrap()
 }

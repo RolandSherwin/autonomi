@@ -14,9 +14,10 @@ use ant_node::BootstrapConfig;
 use ant_node::spawn::network_spawner::NetworkSpawner;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, fmt};
 
 #[tokio::main]
 async fn main() {

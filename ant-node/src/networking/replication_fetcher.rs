@@ -8,19 +8,23 @@
 #![allow(clippy::mutable_key_type)]
 
 use crate::networking::interface::NetworkEvent;
-use ant_protocol::{
-    NetworkAddress, PrettyPrintRecordKey,
-    constants::CLOSE_GROUP_SIZE,
-    storage::{DataTypes, ValidationType},
-};
-use libp2p::{
-    PeerId,
-    kad::{KBucketDistance as Distance, RecordKey},
-};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, hash_map::Entry};
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::constants::CLOSE_GROUP_SIZE;
+use ant_protocol::storage::DataTypes;
+use ant_protocol::storage::ValidationType;
+use libp2p::PeerId;
+use libp2p::kad::KBucketDistance as Distance;
+use libp2p::kad::RecordKey;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
+use std::collections::hash_map::Entry;
 use std::time::Instant;
 use tokio::spawn;
-use tokio::{sync::mpsc, time::Duration};
+use tokio::sync::mpsc;
+use tokio::time::Duration;
 
 // Max parallel fetches that can be undertaken at the same time.
 const MAX_PARALLEL_FETCH: usize = 5;
@@ -605,15 +609,20 @@ impl ReplicationFetcher {
 
 #[cfg(test)]
 mod tests {
-    use super::{FETCH_TIMEOUT, MAX_PARALLEL_FETCH, ReplicationFetcher};
-    use ant_protocol::{NetworkAddress, constants::CLOSE_GROUP_SIZE, storage::ValidationType};
+    use super::FETCH_TIMEOUT;
+    use super::MAX_PARALLEL_FETCH;
+    use super::ReplicationFetcher;
+    use ant_protocol::NetworkAddress;
+    use ant_protocol::constants::CLOSE_GROUP_SIZE;
+    use ant_protocol::storage::ValidationType;
     use eyre::Result;
-    use libp2p::{PeerId, kad::RecordKey};
-    use std::{
-        collections::{HashMap, HashSet},
-        time::Duration,
-    };
-    use tokio::{sync::mpsc, time::sleep};
+    use libp2p::PeerId;
+    use libp2p::kad::RecordKey;
+    use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+    use tokio::time::sleep;
 
     #[tokio::test]
     async fn verify_max_parallel_fetches() -> Result<()> {

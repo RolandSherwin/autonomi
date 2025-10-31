@@ -8,30 +8,32 @@
 
 //! Implementation of the Node in SAFE Network.
 
-use crate::{
-    NodeBuilder, RunningNode,
-    spawn::{
-        network_spawner::{NetworkSpawner, RunningNetwork},
-        node_spawner::NodeSpawner,
-    },
-    utils::get_antnode_root_dir,
-};
-use ant_bootstrap::{BootstrapConfig, bootstrap::Bootstrap};
-use ant_evm::{EvmNetwork, RewardsAddress};
-use ant_protocol::{NetworkAddress, storage::ChunkAddress};
+use crate::NodeBuilder;
+use crate::RunningNode;
+use crate::spawn::network_spawner::NetworkSpawner;
+use crate::spawn::network_spawner::RunningNetwork;
+use crate::spawn::node_spawner::NodeSpawner;
+use crate::utils::get_antnode_root_dir;
+use ant_bootstrap::BootstrapConfig;
+use ant_evm::EvmNetwork;
+use ant_evm::RewardsAddress;
+use ant_protocol::NetworkAddress;
+use ant_protocol::storage::ChunkAddress;
 use const_hex::FromHex;
-use libp2p::{
-    Multiaddr,
-    identity::{Keypair, PeerId},
-};
-use pyo3::{exceptions::PyRuntimeError, exceptions::PyValueError, prelude::*, types::PyModule};
+use libp2p::Multiaddr;
+use libp2p::identity::Keypair;
+use libp2p::identity::PeerId;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::PyModule;
 use pyo3_async_runtimes::tokio::future_into_py;
-use std::{
-    net::{IpAddr, SocketAddr},
-    path::PathBuf,
-    sync::Arc,
-};
-use tokio::sync::{Mutex, RwLock};
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use xor_name::XorName;
 
 /// Python wrapper for the Autonomi Node
@@ -83,16 +85,15 @@ impl PyAntNode {
         let keypair = Keypair::generate_ed25519();
 
         future_into_py(py, async move {
-            let bootstrap = Bootstrap::new(BootstrapConfig {
+            let bootstrap_config = BootstrapConfig {
                 initial_peers,
                 local,
                 ..Default::default()
-            })
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialise bootstrap: {e}")))?;
+            };
 
             let mut node_builder = NodeBuilder::new(
                 keypair,
-                bootstrap,
+                bootstrap_config,
                 rewards_address,
                 evm_network.0,
                 node_socket_addr,
@@ -103,6 +104,7 @@ impl PyAntNode {
 
             let running_node = node_builder
                 .build_and_run()
+                .await
                 .map_err(|e| PyRuntimeError::new_err(format!("Failed to start node: {e}")))?;
 
             Ok(PyAntNode {

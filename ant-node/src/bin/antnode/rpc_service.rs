@@ -8,27 +8,69 @@
 
 use ant_logging::ReloadHandle;
 use ant_node::RunningNode;
-use ant_protocol::antnode_proto::{
-    KBucketsRequest, KBucketsResponse, NetworkInfoRequest, NetworkInfoResponse, NodeEvent,
-    NodeEventsRequest, NodeInfoRequest, NodeInfoResponse, RecordAddressesRequest,
-    RecordAddressesResponse, RestartRequest, RestartResponse, StopRequest, StopResponse,
-    UpdateLogLevelRequest, UpdateLogLevelResponse, UpdateRequest, UpdateResponse,
-    ant_node_server::{AntNode, AntNodeServer},
-    k_buckets_response,
-};
-use ant_protocol::node_rpc::{NodeCtrl, StopResult};
-use eyre::{ErrReport, Result};
-use std::{
-    collections::HashMap,
-    env,
-    net::SocketAddr,
-    process,
-    time::{Duration, Instant},
-};
-use tokio::sync::mpsc::{self, Sender};
+use ant_protocol::antnode_proto::KBucketsRequest;
+use ant_protocol::antnode_proto::KBucketsResponse;
+use ant_protocol::antnode_proto::NetworkInfoRequest;
+use ant_protocol::antnode_proto::NetworkInfoResponse;
+use ant_protocol::antnode_proto::NodeEvent;
+use ant_protocol::antnode_proto::NodeEventsRequest;
+use ant_protocol::antnode_proto::NodeInfoRequest;
+use ant_protocol::antnode_proto::NodeInfoResponse;
+use ant_protocol::antnode_proto::RecordAddressesRequest;
+use ant_protocol::antnode_proto::RecordAddressesResponse;
+use ant_protocol::antnode_proto::RestartRequest;
+use ant_protocol::antnode_proto::RestartResponse;
+use ant_protocol::antnode_proto::StopRequest;
+use ant_protocol::antnode_proto::StopResponse;
+use ant_protocol::antnode_proto::UpdateLogLevelRequest;
+use ant_protocol::antnode_proto::UpdateLogLevelResponse;
+use ant_protocol::antnode_proto::UpdateRequest;
+use ant_protocol::antnode_proto::UpdateResponse;
+use ant_protocol::antnode_proto::ant_node_server::AntNode;
+use ant_protocol::antnode_proto::ant_node_server::AntNodeServer;
+use ant_protocol::antnode_proto::k_buckets_response;
+use eyre::ErrReport;
+use eyre::Result;
+use std::collections::HashMap;
+use std::env;
+use std::net::SocketAddr;
+use std::process;
+use std::time::Duration;
+use std::time::Instant;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Code, Request, Response, Status, transport::Server};
-use tracing::{debug, info};
+use tonic::Code;
+use tonic::Request;
+use tonic::Response;
+use tonic::Status;
+use tonic::transport::Server;
+use tracing::debug;
+use tracing::info;
+
+#[derive(Debug)]
+/// To be sent to the main thread in order to stop/restart the execution of the antnode app.
+pub enum NodeCtrl {
+    /// Request to stop the execution of the antnode app, providing an error as a reason for it.
+    Stop {
+        delay: Duration,
+        result: StopResult,
+    },
+    /// Request to restart the execution of the antnode app, retrying to join the network, after the requested delay.
+    /// Set `retain_peer_id` to `true` if you want to re-use the same root dir/secret keys/PeerId.
+    Restart {
+        delay: Duration,
+        retain_peer_id: bool,
+    },
+    // Request to update the antnode app, and restart it, after the requested delay.
+    Update(Duration),
+}
+
+#[derive(Debug)]
+pub enum StopResult {
+    Success(String),
+    Error(Box<ant_node::Error>),
+}
 
 // Defining a struct to hold information used by our gRPC service backend
 struct SafeNodeRpcService {
@@ -106,37 +148,12 @@ impl AntNode for SafeNodeRpcService {
         request: Request<NodeEventsRequest>,
     ) -> Result<Response<Self::NodeEventsStream>, Status> {
         debug!(
-            "RPC request received at {}: {:?}",
+            "RPC request received at {}: {:?}. Ignored currently",
             self.addr,
             request.get_ref()
         );
 
-        let (client_tx, client_rx) = mpsc::channel(4);
-
-        let mut events_rx = self.running_node.node_events_channel().subscribe();
-        let _handle = tokio::spawn(async move {
-            while let Ok(event) = events_rx.recv().await {
-                let event_bytes = match event.to_bytes() {
-                    Ok(bytes) => bytes,
-                    Err(err) => {
-                        debug!(
-                            "Error {err:?} while converting NodeEvent to bytes, ignoring the error"
-                        );
-                        continue;
-                    }
-                };
-
-                let event = NodeEvent { event: event_bytes };
-
-                if let Err(err) = client_tx.send(Ok(event)).await {
-                    debug!(
-                        "Dropping stream sender to RPC client due to failure in \
-                        last attempt to notify an event: {err}"
-                    );
-                    break;
-                }
-            }
-        });
+        let (_client_tx, client_rx) = mpsc::channel(1);
 
         Ok(Response::new(ReceiverStream::new(client_rx)))
     }

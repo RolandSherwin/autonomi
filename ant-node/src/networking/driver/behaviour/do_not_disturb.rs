@@ -8,32 +8,43 @@
 
 #![allow(dead_code)]
 
+use futures::AsyncRead;
+use futures::AsyncReadExt;
+use futures::AsyncWrite;
+use futures::AsyncWriteExt;
 use futures::future::BoxFuture;
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use libp2p::{
-    Stream, StreamProtocol,
-    core::{
-        Endpoint, Multiaddr,
-        transport::PortUse,
-        upgrade::{InboundUpgrade, OutboundUpgrade, UpgradeInfo},
-    },
-    identity::PeerId,
-    swarm::{
-        ConnectionDenied, ConnectionHandler, ConnectionId, FromSwarm, NetworkBehaviour,
-        SubstreamProtocol, THandler, THandlerInEvent, THandlerOutEvent, ToSwarm,
-        handler::{
-            ConnectionEvent, DialUpgradeError, FullyNegotiatedInbound, FullyNegotiatedOutbound,
-            ListenUpgradeError,
-        },
-    },
-};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fmt, io,
-    task::{Context, Poll},
-    time::Duration,
-};
+use libp2p::Stream;
+use libp2p::StreamProtocol;
+use libp2p::core::Endpoint;
+use libp2p::core::Multiaddr;
+use libp2p::core::transport::PortUse;
+use libp2p::core::upgrade::InboundUpgrade;
+use libp2p::core::upgrade::OutboundUpgrade;
+use libp2p::core::upgrade::UpgradeInfo;
+use libp2p::identity::PeerId;
+use libp2p::swarm::ConnectionDenied;
+use libp2p::swarm::ConnectionHandler;
+use libp2p::swarm::ConnectionId;
+use libp2p::swarm::FromSwarm;
+use libp2p::swarm::NetworkBehaviour;
+use libp2p::swarm::SubstreamProtocol;
+use libp2p::swarm::THandler;
+use libp2p::swarm::THandlerInEvent;
+use libp2p::swarm::THandlerOutEvent;
+use libp2p::swarm::ToSwarm;
+use libp2p::swarm::handler::ConnectionEvent;
+use libp2p::swarm::handler::DialUpgradeError;
+use libp2p::swarm::handler::FullyNegotiatedInbound;
+use libp2p::swarm::handler::FullyNegotiatedOutbound;
+use libp2p::swarm::handler::ListenUpgradeError;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::fmt;
+use std::io;
+use std::task::Context;
+use std::task::Poll;
+use std::time::Duration;
 use tokio::time::Instant;
 
 pub(crate) const MAX_DO_NOT_DISTURB_DURATION: u64 = 5 * 60; // 5 minutes
@@ -782,10 +793,11 @@ impl NetworkBehaviour for Behaviour {
 mod tests {
     use super::*;
     use futures::StreamExt;
-    use libp2p::swarm::{
-        DialError, Swarm, SwarmEvent,
-        dial_opts::{DialOpts, PeerCondition},
-    };
+    use libp2p::swarm::DialError;
+    use libp2p::swarm::Swarm;
+    use libp2p::swarm::SwarmEvent;
+    use libp2p::swarm::dial_opts::DialOpts;
+    use libp2p::swarm::dial_opts::PeerCondition;
     use libp2p_swarm_test::SwarmExt;
     use std::time::Duration;
     use tokio::time;
@@ -1123,7 +1135,8 @@ mod tests {
         assert_eq!(behaviour.pending_events.len(), 1);
 
         // Poll to get the event
-        use std::task::{Context, Poll};
+        use std::task::Context;
+        use std::task::Poll;
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -1170,8 +1183,10 @@ mod tests {
     #[tokio::test]
     async fn test_swarm1_sends_dnd_to_swarm2_integration() {
         use futures::stream::StreamExt;
-        use libp2p::swarm::{Swarm, SwarmEvent};
-        use tokio::time::{Duration as TokioDuration, timeout};
+        use libp2p::swarm::Swarm;
+        use libp2p::swarm::SwarmEvent;
+        use tokio::time::Duration as TokioDuration;
+        use tokio::time::timeout;
 
         // Create two swarms with DND behavior
         let mut swarm1 = Swarm::new_ephemeral_tokio(|_| Behaviour::default());
@@ -1218,7 +1233,8 @@ mod tests {
         println!("swarm1 sending DND to peer2: {peer2_id:?}");
 
         // Poll swarm1 to process the DND request
-        use std::task::{Context, Poll};
+        use std::task::Context;
+        use std::task::Poll;
         let waker = futures::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
 
@@ -1313,8 +1329,10 @@ mod tests {
     #[tokio::test]
     async fn test_full_stream_processing_integration() {
         use futures::stream::StreamExt;
-        use libp2p::swarm::{Swarm, SwarmEvent};
-        use tokio::time::{Duration as TokioDuration, timeout};
+        use libp2p::swarm::Swarm;
+        use libp2p::swarm::SwarmEvent;
+        use tokio::time::Duration as TokioDuration;
+        use tokio::time::timeout;
 
         // Create two swarms with DND behavior
         let mut swarm1 = Swarm::new_ephemeral_tokio(|_| Behaviour::default());
@@ -1462,8 +1480,10 @@ mod tests {
     #[tokio::test]
     async fn test_dnd_full_stream_integration_future() {
         use futures::stream::StreamExt;
-        use libp2p::swarm::{Swarm, SwarmEvent};
-        use tokio::time::{Duration as TokioDuration, timeout};
+        use libp2p::swarm::Swarm;
+        use libp2p::swarm::SwarmEvent;
+        use tokio::time::Duration as TokioDuration;
+        use tokio::time::timeout;
 
         println!("🚀 Testing complete DND stream-based integration...");
 
@@ -1686,8 +1706,10 @@ mod tests {
     #[tokio::test]
     async fn test_exact_flow_peer_a_requests_peer_b_blocks() {
         use futures::stream::StreamExt;
-        use libp2p::swarm::{Swarm, SwarmEvent};
-        use tokio::time::{Duration as TokioDuration, timeout};
+        use libp2p::swarm::Swarm;
+        use libp2p::swarm::SwarmEvent;
+        use tokio::time::Duration as TokioDuration;
+        use tokio::time::timeout;
 
         println!(
             "🎯 Testing exact flow: PeerA sends block request to PeerB → PeerB blocks outgoing connections to PeerA"

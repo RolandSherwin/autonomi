@@ -6,53 +6,69 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::{
-    Marker, NodeEvent, error::Result, event::NodeEventsChannel, quote::quotes_verification,
-};
+use super::Marker;
+use super::NodeEvent;
+use super::error::Error;
+use super::error::Result;
+use super::event::NodeEventsChannel;
+use super::quote::quotes_verification;
+use crate::PutValidationError;
+use crate::ReachabilityStatus;
+use crate::RunningNode;
+use crate::critical_failure::set_critical_failure;
+use crate::listen_addr_writer::ListenAddrWriter;
 #[cfg(feature = "open-metrics")]
 use crate::metrics::NodeMetricsRecorder;
+use crate::networking::Addresses;
 #[cfg(feature = "open-metrics")]
 use crate::networking::MetricsRegistries;
-use crate::networking::{Addresses, Network, NetworkConfig, NetworkError, NetworkEvent, NodeIssue};
-use crate::{PutValidationError, RunningNode};
-use ant_bootstrap::bootstrap::Bootstrap;
+use crate::networking::Network;
+use crate::networking::NetworkConfig;
+use crate::networking::NetworkError;
+use crate::networking::NetworkEvent;
+use crate::networking::NodeIssue;
+use crate::networking::init_reachability_check_swarm;
+use ant_bootstrap::BootstrapConfig;
 use ant_evm::EvmNetwork;
 use ant_evm::RewardsAddress;
-use ant_protocol::{
-    CLOSE_GROUP_SIZE, NetworkAddress, PrettyPrintRecordKey,
-    error::Error as ProtocolError,
-    messages::{ChunkProof, CmdResponse, Nonce, Query, QueryResponse, Request, Response},
-    storage::ValidationType,
-};
+use ant_protocol::CLOSE_GROUP_SIZE;
+use ant_protocol::NetworkAddress;
+use ant_protocol::PrettyPrintRecordKey;
+use ant_protocol::error::Error as ProtocolError;
+use ant_protocol::messages::ChunkProof;
+use ant_protocol::messages::CmdResponse;
+use ant_protocol::messages::Nonce;
+use ant_protocol::messages::Query;
+use ant_protocol::messages::QueryResponse;
+use ant_protocol::messages::Request;
+use ant_protocol::messages::Response;
+use ant_protocol::storage::ValidationType;
 use bytes::Bytes;
 use itertools::Itertools;
-use libp2p::{
-    Multiaddr, PeerId,
-    identity::Keypair,
-    kad::{Record, U256},
-    request_response::OutboundFailure,
-};
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::identity::Keypair;
+use libp2p::kad::Record;
+use libp2p::kad::U256;
+use libp2p::request_response::OutboundFailure;
 use num_traits::cast::ToPrimitive;
-use rand::{
-    Rng, SeedableRng,
-    rngs::{OsRng, StdRng},
-    thread_rng,
-};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::OsRng;
+use rand::rngs::StdRng;
+use rand::thread_rng;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+use std::time::Instant;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::watch;
-use tokio::{
-    sync::mpsc::Receiver,
-    task::{JoinSet, spawn},
-};
+use tokio::task::JoinSet;
+use tokio::task::spawn;
 
 /// Interval to trigger replication of all records to all peers.
 /// This is the max time it should take. Minimum interval at any node will be half this
@@ -82,7 +98,7 @@ const TIME_STEP: usize = 20;
 /// Helper to build and run a Node
 pub struct NodeBuilder {
     addr: SocketAddr,
-    bootstrap: Bootstrap,
+    bootstrap_config: BootstrapConfig,
     evm_address: RewardsAddress,
     evm_network: EvmNetwork,
     identity_keypair: Keypair,
@@ -101,7 +117,7 @@ impl NodeBuilder {
     /// or fetched from the bootstrap cache set using `bootstrap_cache` method.
     pub fn new(
         identity_keypair: Keypair,
-        bootstrap_flow: Bootstrap,
+        bootstrap_config: BootstrapConfig,
         evm_address: RewardsAddress,
         evm_network: EvmNetwork,
         addr: SocketAddr,
@@ -109,7 +125,7 @@ impl NodeBuilder {
     ) -> Self {
         Self {
             addr,
-            bootstrap: bootstrap_flow,
+            bootstrap_config,
             evm_address,
             evm_network,
             identity_keypair,
@@ -120,6 +136,11 @@ impl NodeBuilder {
             reachability_check: false,
             root_dir,
         }
+    }
+
+    /// Set the socket address for the node to listen on.
+    pub fn with_socket_addr(&mut self, addr: SocketAddr) {
+        self.addr = addr;
     }
 
     /// Enabling this would run external reachability check before starting the node.
@@ -144,6 +165,48 @@ impl NodeBuilder {
         self.no_upnp = no_upnp;
     }
 
+    /// Check if the node is publicly reachable.
+    pub async fn run_reachability_check(
+        &self,
+    ) -> Result<(ReachabilityStatus, Option<watch::Sender<bool>>)> {
+        #[cfg(feature = "open-metrics")]
+        let (_metrics_recorder, metrics_registries) = if self.metrics_server_port.is_some() {
+            // metadata registry
+            let mut metrics_registries = MetricsRegistries::default();
+            let metrics_recorder = NodeMetricsRecorder::new(&mut metrics_registries);
+
+            (Some(metrics_recorder), metrics_registries)
+        } else {
+            (None, MetricsRegistries::default())
+        };
+
+        // create a shutdown signal channel
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        // init network
+        let network_config = NetworkConfig {
+            keypair: self.identity_keypair.clone(),
+            local: self.local,
+            listen_addr: self.addr,
+            root_dir: self.root_dir.clone(),
+            shutdown_rx: shutdown_rx.clone(),
+            bootstrap_config: self.bootstrap_config.clone(),
+            no_upnp: self.no_upnp,
+            custom_request_timeout: None,
+            reachability_status: None,
+            #[cfg(feature = "open-metrics")]
+            metrics_registries,
+            #[cfg(feature = "open-metrics")]
+            metrics_server_port: self.metrics_server_port,
+        };
+
+        let (swarm_driver, metrics_shutdown_tx) =
+            init_reachability_check_swarm(network_config).await?;
+        let status = swarm_driver.detect().await?;
+
+        Ok((status, metrics_shutdown_tx))
+    }
+
     /// Asynchronously runs a new node instance, setting up the swarm driver,
     /// creating a data storage, and handling network events. Returns the
     /// created `RunningNode` which contains a `NodeEventsChannel` for listening
@@ -155,9 +218,64 @@ impl NodeBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if there is a problem initializing the Network.
-    pub fn build_and_run(self) -> Result<RunningNode> {
-        // setup metrics
+    /// Returns an error if there is a problem initializing the `Network`.
+    pub async fn build_and_run(self) -> Result<RunningNode> {
+        let mut no_upnp = self.no_upnp;
+        let mut address = self.addr;
+        let mut reachability_status = None;
+
+        if self.reachability_check {
+            info!("Running reachability check ... This might take a few minutes to complete.");
+            let status = self.run_reachability_check().await;
+
+            if let Ok((s, _)) = &status {
+                reachability_status = Some(s.clone());
+            }
+            match status {
+                Ok((
+                    ReachabilityStatus::Reachable {
+                        local_addr,
+                        upnp,
+                        external_addr: _,
+                    },
+                    metrics_shutdown_tx,
+                )) => {
+                    info!(
+                        "We are reachable. Starting node with socket addr: {local_addr} and UPnP: {upnp:?}",
+                    );
+                    println!("Starting node with socket addr: {local_addr} and UPnP: {upnp:?}");
+                    address = local_addr;
+                    if self.no_upnp {
+                        info!("UPnP is disabled via config.");
+                    } else {
+                        no_upnp = !upnp;
+                    }
+                    if let Some(tx) = metrics_shutdown_tx {
+                        let _ = tx.send(true);
+                    }
+                }
+                Ok((ReachabilityStatus::NotReachable { reasons }, _metrics_shutdown_tx)) => {
+                    info!(
+                        "We are NOT reachable due to: {reasons:?}. Terminating the node in 120 seconds."
+                    );
+                    println!("Terminating the node in 120 seconds: {reasons:?}");
+                    let failure_error = Error::UnreachableNode;
+                    set_critical_failure(&self.root_dir, &failure_error);
+                    tokio::time::sleep(Duration::from_secs(120)).await;
+                    return Err(failure_error);
+                }
+                Err(err) => {
+                    info!(
+                        "Reachability check error: {err:?}. Terminating the node in 120 seconds."
+                    );
+                    println!("Terminating the node in 120 seconds: {err:?}");
+                    set_critical_failure(&self.root_dir, &err);
+                    tokio::time::sleep(Duration::from_secs(120)).await;
+                    return Err(err);
+                }
+            }
+        }
+
         #[cfg(feature = "open-metrics")]
         let (metrics_recorder, metrics_registries) = if self.metrics_server_port.is_some() {
             // metadata registry
@@ -176,19 +294,20 @@ impl NodeBuilder {
         let network_config = NetworkConfig {
             keypair: self.identity_keypair,
             local: self.local,
-            listen_addr: self.addr,
+            listen_addr: address,
             root_dir: self.root_dir.clone(),
             shutdown_rx: shutdown_rx.clone(),
-            bootstrap: self.bootstrap,
-            no_upnp: self.no_upnp,
+            bootstrap_config: self.bootstrap_config,
+            no_upnp,
             custom_request_timeout: None,
-            reachability_status: None,
             #[cfg(feature = "open-metrics")]
             metrics_registries,
             #[cfg(feature = "open-metrics")]
             metrics_server_port: self.metrics_server_port,
+            reachability_status,
         };
-        let (network, network_event_receiver) = Network::init(network_config)?;
+        ListenAddrWriter::reset(self.root_dir.to_path_buf());
+        let (network, network_event_receiver, metrics_shutdown_tx) = Network::init(network_config)?;
 
         // init node
         let node_events_channel = NodeEventsChannel::default();
@@ -198,6 +317,7 @@ impl NodeBuilder {
             reward_address: self.evm_address,
             #[cfg(feature = "open-metrics")]
             metrics_recorder,
+            root_dir: self.root_dir.clone(),
             evm_network: self.evm_network,
         };
         let node = Node {
@@ -208,6 +328,7 @@ impl NodeBuilder {
         node.run(network_event_receiver, shutdown_rx);
         let running_node = RunningNode {
             shutdown_sender: shutdown_tx,
+            metrics_server_shutdown_sender: metrics_shutdown_tx,
             network,
             node_events_channel,
             root_dir_path: self.root_dir,
@@ -234,6 +355,7 @@ struct NodeInner {
     #[cfg(feature = "open-metrics")]
     metrics_recorder: Option<NodeMetricsRecorder>,
     reward_address: RewardsAddress,
+    root_dir: PathBuf,
     evm_network: EvmNetwork,
 }
 
@@ -262,6 +384,10 @@ impl Node {
 
     pub(crate) fn evm_network(&self) -> &EvmNetwork {
         &self.inner.evm_network
+    }
+
+    pub(crate) fn root_dir(&self) -> &PathBuf {
+        &self.inner.root_dir
     }
 
     /// Spawns a task to process for `NetworkEvents`.
@@ -460,8 +586,13 @@ impl Node {
             NetworkEvent::PeerWithUnsupportedProtocol { .. } => {
                 event_header = "PeerWithUnsupportedProtocol";
             }
-            NetworkEvent::NewListenAddr(_) => {
+            NetworkEvent::NewListenAddr(addr) => {
+                ListenAddrWriter::add_listeners(self.root_dir().clone(), addr);
                 event_header = "NewListenAddr";
+            }
+            NetworkEvent::ExpiredListenAddresses(addresses) => {
+                ListenAddrWriter::remove_listener(self.root_dir().clone(), addresses);
+                event_header = "ExpiredListenAddresses";
             }
             NetworkEvent::ResponseReceived { res } => {
                 event_header = "ResponseReceived";
@@ -514,7 +645,7 @@ impl Node {
                 event_header = "TerminateNode";
                 error!("Received termination from swarm_driver due to {reason:?}");
                 self.events_channel()
-                    .broadcast(NodeEvent::TerminateNode(format!("{reason}")));
+                    .broadcast(NodeEvent::TerminateNode(reason));
             }
             NetworkEvent::FailedToFetchHolders(bad_nodes) => {
                 event_header = "FailedToFetchHolders";

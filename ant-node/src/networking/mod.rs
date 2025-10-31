@@ -23,26 +23,28 @@ mod replication_fetcher;
 mod transport;
 
 // re-export arch dependent deps for use in the crate, or above
+pub(crate) use self::interface::NetworkEvent;
+pub(crate) use self::interface::NodeIssue;
 pub use self::interface::SwarmLocalState;
+pub(crate) use self::network::Network;
+pub(crate) use self::network::NetworkConfig;
+pub(crate) use self::network::init_reachability_check_swarm;
 pub use self::reachability_check::ReachabilityIssue;
 pub use self::reachability_check::ReachabilityStatus;
-pub(crate) use self::{
-    error::NetworkError,
-    interface::{NetworkEvent, NodeIssue},
-    network::{Network, NetworkConfig},
-    record_store::NodeRecordStore,
-};
-
+pub(crate) use self::record_store::NodeRecordStore;
+pub use error::NetworkError;
 #[cfg(feature = "open-metrics")]
 pub(crate) use metrics::service::MetricsRegistries;
 
 use self::error::Result;
-use ant_protocol::{CLOSE_GROUP_SIZE, NetworkAddress};
-use libp2p::{
-    Multiaddr, PeerId,
-    kad::{KBucketDistance, KBucketKey},
-    multiaddr::Protocol,
-};
+use ant_protocol::CLOSE_GROUP_SIZE;
+use ant_protocol::NetworkAddress;
+use libp2p::Multiaddr;
+use libp2p::PeerId;
+use libp2p::kad::KBucketDistance;
+use libp2p::kad::KBucketKey;
+use libp2p::multiaddr::Protocol;
+use std::net::IpAddr;
 
 /// Sort the provided peers by their distance to the given `KBucketKey`.
 /// Return with the closest expected number of entries it has.
@@ -89,6 +91,14 @@ pub fn sort_peers_by_key<T>(
 #[derive(Clone, Debug, Default)]
 pub struct Addresses(pub Vec<Multiaddr>);
 
+/// Get the `IpAddr` from the `Multiaddr`
+pub(crate) fn multiaddr_get_ip(addr: &Multiaddr) -> Option<IpAddr> {
+    addr.iter().find_map(|p| match p {
+        Protocol::Ip4(addr) => Some(IpAddr::V4(addr)),
+        _ => None,
+    })
+}
+
 pub(crate) fn multiaddr_get_port(addr: &Multiaddr) -> Option<u16> {
     addr.iter().find_map(|p| match p {
         Protocol::Udp(port) => Some(port),
@@ -120,13 +130,6 @@ pub(crate) fn multiaddr_pop_p2p(addr: &mut Multiaddr) -> Option<PeerId> {
 pub(crate) fn multiaddr_get_p2p(addr: &Multiaddr) -> Option<PeerId> {
     addr.iter().find_map(|p| match p {
         Protocol::P2p(peer_id) => Some(peer_id),
-        _ => None,
-    })
-}
-
-pub(crate) fn multiaddr_get_ip(addr: &Multiaddr) -> Option<std::net::IpAddr> {
-    addr.iter().find_map(|p| match p {
-        Protocol::Ip4(ipv4) => Some(std::net::IpAddr::V4(ipv4)),
         _ => None,
     })
 }
