@@ -9,12 +9,10 @@
 #[cfg(feature = "open-metrics")]
 use crate::networking::MetricsRegistries;
 use libp2p::{
-    PeerId, Transport as _,
     core::{muxing::StreamMuxerBox, transport},
     identity::Keypair,
+    PeerId, Transport as _,
 };
-
-const MAX_STREAM_DATA_ENV_STR: &str = "ANT_MAX_STREAM_DATA";
 
 pub(crate) fn build_transport(
     keypair: &Keypair,
@@ -33,19 +31,8 @@ fn generate_quic_transport(
     keypair: &Keypair,
 ) -> libp2p::quic::GenTransport<libp2p::quic::tokio::Provider> {
     let mut quic_config = libp2p::quic::Config::new(keypair);
-    if let Ok(val) = std::env::var(MAX_STREAM_DATA_ENV_STR) {
-        match val.parse::<u32>() {
-            Ok(val) => {
-                quic_config.max_stream_data = val;
-                tracing::info!("Overriding QUIC connection receive window value to {val}");
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "QUIC connection receive window value override failed. Could not parse `{MAX_STREAM_DATA_ENV_STR}={val}` as integer: {e}"
-                )
-            }
-        }
-    }
+    // Reduce to 1MB from the default 10MB.
+    quic_config.max_stream_data = 1024 * 1024;
 
     libp2p::quic::tokio::Transport::new(quic_config)
 }
