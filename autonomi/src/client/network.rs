@@ -7,8 +7,8 @@
 // permissions and limitations relating to use of the SAFE Network Software.
 
 use crate::Client;
-use crate::networking::{NetworkError, PeerQuoteWithStorageProof};
 use crate::networking::version::PackageVersion;
+use crate::networking::{NetworkError, PeerQuoteWithStorageProof};
 use crate::utils::process_tasks_with_max_concurrency;
 use ant_protocol::NetworkAddress;
 use ant_protocol::storage::DataTypes;
@@ -73,7 +73,14 @@ impl Client {
         data_size: usize,
     ) -> Result<PeerQuoteWithStorageProof, NetworkError> {
         self.network
-            .get_storage_proofs_from_peer(network_address.into(), peer, nonce, difficulty, data_type, data_size)
+            .get_storage_proofs_from_peer(
+                network_address.into(),
+                peer,
+                nonce,
+                difficulty,
+                data_type,
+                data_size,
+            )
             .await
     }
 

@@ -56,7 +56,13 @@ pub const CLOSE_GROUP_SIZE_MAJORITY: usize = CLOSE_GROUP_SIZE / 2 + 1;
 pub(crate) const QUOTING_CANDIDATES: usize = 10;
 
 /// Peer quoting result with storage proofs attached.
-pub type PeerQuoteWithStorageProof = (Option<PaymentQuote>, Vec<(NetworkAddress, Result<ant_protocol::messages::ChunkProof, ant_protocol::error::Error>)>);
+pub type PeerQuoteWithStorageProof = (
+    Option<PaymentQuote>,
+    Vec<(
+        NetworkAddress,
+        Result<ant_protocol::messages::ChunkProof, ant_protocol::error::Error>,
+    )>,
+);
 
 /// The number of closest peers to request from the network
 const N_CLOSEST_PEERS: NonZeroUsize =
