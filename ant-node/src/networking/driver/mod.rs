@@ -10,13 +10,11 @@ pub(crate) mod behaviour;
 pub(crate) mod cmd;
 pub(crate) mod event;
 pub(crate) mod network_discovery;
-pub(crate) mod network_wide_replication;
 
 use ant_bootstrap::BootstrapCacheStore;
 use event::NodeEvent;
 use network_discovery::{NETWORK_DISCOVER_INTERVAL, NetworkDiscovery};
 
-use crate::networking::driver::network_wide_replication::NetworkWideReplication;
 #[cfg(feature = "open-metrics")]
 use crate::networking::metrics::NetworkMetricsRecorder;
 use crate::networking::{
@@ -71,11 +69,6 @@ const DIAL_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const BOOTSTRAP_CHECK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 
-pub(crate) const NETWORK_WIDE_REPLICATION_INTERVAL: Duration = Duration::from_secs(15 * 60);
-
-/// Maximum number of peers to keep in the blocklist before evicting oldest entries
-pub(crate) const BLOCKLIST_CACHE_SIZE: usize = 1000;
-
 /// The ways in which the Get Closest queries are used.
 pub(crate) enum PendingGetClosestType {
     /// The network discovery method is present at the networking layer
@@ -121,7 +114,6 @@ pub(crate) struct SwarmDriver {
     pub(crate) initial_bootstrap_trigger: InitialBootstrapTrigger,
     pub(crate) network_discovery: NetworkDiscovery,
     pub(crate) bootstrap: Bootstrap,
-    pub(crate) network_wide_replication: NetworkWideReplication,
     pub(crate) external_address_manager: Option<ExternalAddressManager>,
     pub(crate) relay_manager: Option<RelayManager>,
     /// The peers that are using our relay service.
@@ -185,7 +177,6 @@ impl SwarmDriver {
         let mut relay_manager_reservation_interval = interval(RELAY_MANAGER_RESERVATION_INTERVAL);
         let mut bootstrap_interval = Some(interval(BOOTSTRAP_CHECK_INTERVAL));
         let mut dial_queue_check_interval = interval(DIAL_QUEUE_CHECK_INTERVAL);
-        let mut network_wide_replication_interval = interval(NETWORK_WIDE_REPLICATION_INTERVAL);
         let _ = dial_queue_check_interval.tick().await; // first tick completes immediately
 
         let mut round_robin_index = 0;
@@ -271,12 +262,6 @@ impl SwarmDriver {
                             info!("Initial bootstrap process completed. Marking bootstrap_interval as None.");
                             bootstrap_interval = None;
                         }
-                    }
-                }
-                // runs every NETWORK_WIDE_REPLICATION_INTERVAL time
-                _ = network_wide_replication_interval.tick() => {
-                    if let Err(err) = self.network_wide_replication.execute(&mut self.swarm).await {
-                        warn!("Error during network wide replication: {err}");
                     }
                 }
                 // runs every bootstrap_interval time

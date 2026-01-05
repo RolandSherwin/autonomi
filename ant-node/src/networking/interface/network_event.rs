@@ -67,10 +67,6 @@ pub(crate) enum NetworkEvent {
     },
     /// Peers of picked bucket for version query.
     PeersForVersionQuery(Vec<(PeerId, Addresses)>),
-    /// Check if the nodes close to these keys hold the record, else replicate to them.
-    NetworkWideReplication {
-        keys: Vec<(NetworkAddress, ValidationType)>,
-    },
 }
 
 /// Terminate node for the following reason
@@ -154,9 +150,6 @@ impl std::fmt::Debug for NetworkEvent {
                         .map(|(peer, _addrs)| peer)
                         .collect::<Vec<&PeerId>>()
                 )
-            }
-            NetworkEvent::NetworkWideReplication { keys } => {
-                write!(f, "NetworkEvent::NetworkWideReplication({keys:?})")
             }
         }
     }

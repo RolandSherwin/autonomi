@@ -31,6 +31,7 @@ pub(crate) enum Marker<'a> {
         within_responsible_distance: bool,
     },
     /// Replication sender range check result
+    #[allow(dead_code)]
     ReplicationSenderRange {
         sender: &'a PeerId,
         keys_count: usize,

@@ -6,10 +6,9 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::networking::{Addresses, Network};
+use crate::networking::Network;
 use crate::{error::Result, node::Node};
 use ant_evm::ProofOfPayment;
-use ant_protocol::messages::Cmd;
 use ant_protocol::{
     NetworkAddress, PrettyPrintRecordKey,
     messages::{Query, QueryResponse, Request, Response},
@@ -19,7 +18,6 @@ use libp2p::{
     PeerId,
     kad::{Record, RecordKey},
 };
-use prometheus_client::metrics::histogram::Histogram;
 use tokio::task::spawn;
 
 impl Node {
@@ -243,99 +241,5 @@ impl Node {
                     .add_fresh_records_to_the_replication_fetcher(holder, new_keys);
             }
         });
-    }
-
-    pub(crate) fn perform_network_wide_replication(
-        &self,
-        keys: Vec<(NetworkAddress, ValidationType)>,
-    ) {
-        for (key, val_type) in keys {
-            #[cfg(feature = "open-metrics")]
-            let network_wide_replication_holders = self
-                .metrics_recorder()
-                .map(|recorder| recorder.network_wide_replication_holders.clone());
-            let network = self.network().clone();
-            let _handle = spawn(async move {
-                Self::network_wide_replication_per_key(network, key, val_type).await;
-            });
-        }
-    }
-
-    async fn network_wide_replication_per_key(
-        network: Network,
-        key: NetworkAddress,
-        val_type: ValidationType,
-    ) {
-        // get closest to the key
-        let peers = match network.get_closest_peers(&key).await {
-            Ok(mut peers) => {
-                // sort by distance to the key
-                peers
-                    .sort_by_key(|(peer_id, _addrs)| key.distance(&NetworkAddress::from(*peer_id)));
-                peers.truncate(ant_protocol::constants::CLOSE_GROUP_SIZE);
-                peers
-            }
-            Err(err) => {
-                warn!(
-                    "Failed to get closest peers for network wide replication for key {key:?} with error {err:?}"
-                );
-                return;
-            }
-        };
-
-        // check if these peers have the record
-        let req = Request::Query(Query::GetReplicatedRecord {
-            requester: NetworkAddress::from(network.peer_id()),
-            key: key.clone(),
-        });
-        let responses = network.send_and_get_responses(&peers, &req, true).await;
-
-        let mut to_replicate = vec![];
-        for (peer_id, response) in responses {
-            match response {
-                Ok((resp, _)) => {
-                    if let Response::Query(QueryResponse::GetReplicatedRecord(result)) = resp {
-                        match result {
-                            Ok((_holder, _record_content)) => {
-                                debug!(
-                                    "Peer {peer_id:?} has the record {key:?} during network wide replication"
-                                );
-                                // peer has the record, no need to replicate
-                            }
-                            Err(_) => {
-                                debug!(
-                                    "Peer {peer_id:?} does not have the record {key:?} during network wide replication, will replicate"
-                                );
-                                // peer does not have the record, proceed to replicate
-                                to_replicate.push(peer_id);
-                            }
-                        }
-                    } else {
-                        warn!(
-                            "Unexpected response from peer {peer_id:?} during network wide replication for key {key:?}: {resp:?}"
-                        );
-                    }
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to send GetReplicatedRecord for {key:?} to peer {peer_id:?} during network wide replication with error {err:?}"
-                    );
-                }
-            }
-        }
-
-        for peer in to_replicate {
-            let request = Request::Cmd(Cmd::Replicate {
-                holder: NetworkAddress::from(network.peer_id()),
-                keys: vec![(key.clone(), val_type.clone())],
-            });
-
-            let _ = network
-                .send_request(request, peer, Addresses::default())
-                .await;
-            debug!(
-                "Sent Cmd::Replicate for key {key:?} to peer {peer:?} during network wide replication"
-            );
-        }
     }
 }

@@ -66,6 +66,7 @@ pub(crate) struct NetworkMetricsRecorder {
     pub(crate) replication_sender_range: Family<replication::ReplicationSenderRangeLabels, Counter>,
     pub(crate) replication_sender_close_group_threshold: Gauge,
     pub(crate) replication_sender_extended_distance_multiplier: Gauge,
+    #[allow(dead_code)]
     pub(crate) replication_sender_extended_distance_ilog2: Gauge,
     pub(crate) replication_sender_outcome:
         Family<replication::ReplicationSenderOutcomeLabels, Counter>,

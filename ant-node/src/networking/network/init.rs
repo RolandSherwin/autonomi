@@ -12,8 +12,7 @@ use crate::networking::{
     CLOSE_GROUP_SIZE, NetworkEvent,
     circular_vec::CircularVec,
     driver::{
-        BLOCKLIST_CACHE_SIZE, InitialBootstrapTrigger, NodeBehaviour, SwarmDriver,
-        network_discovery::NetworkDiscovery, network_wide_replication::NetworkWideReplication,
+        InitialBootstrapTrigger, NodeBehaviour, SwarmDriver, network_discovery::NetworkDiscovery,
     },
     error::{NetworkError, Result},
     external_address::ExternalAddressManager,
@@ -415,7 +414,6 @@ fn init_swarm_driver(
         bootstrap: config.bootstrap,
         relay_manager,
         connected_relay_clients: Default::default(),
-        network_wide_replication: NetworkWideReplication::new(network_event_sender.clone()),
         external_address_manager,
         replication_fetcher,
         #[cfg(feature = "open-metrics")]
@@ -445,7 +443,7 @@ fn init_swarm_driver(
         last_connection_pruning_time: Instant::now(),
         peers_version: Default::default(),
         dial_queue: Default::default(),
-        blocklist_cache: CircularVec::new(BLOCKLIST_CACHE_SIZE),
+        blocklist_cache: CircularVec::new(100),
     };
 
     (network_event_receiver, swarm_driver)
