@@ -29,7 +29,7 @@ pub(crate) struct NetworkWideReplication {
     last_replication_time: Option<std::time::Instant>,
     complete_replication_within: std::time::Instant,
     event_sender: mpsc::Sender<NetworkEvent>,
-    network_is_under_load: Option<std::time::Instant>,
+    network_is_under_load: bool,
 }
 
 impl NetworkWideReplication {
@@ -43,17 +43,13 @@ impl NetworkWideReplication {
             last_replication_time: None,
             complete_replication_within,
             event_sender,
-            network_is_under_load: None,
+            network_is_under_load: false,
         }
-    }
-
-    pub(crate) fn set_network_under_load(&mut self) {
-        self.network_is_under_load = Some(Instant::now());
     }
 
     /// The network is under load if we performed network wide replication in the last 72 hours.
     pub(crate) fn is_network_under_load(&self) -> bool {
-        self.network_is_under_load.is_some()
+        self.network_is_under_load
     }
 
     /// Calculate how many keys to send in this execution to complete replication within deadline.
@@ -112,11 +108,11 @@ impl NetworkWideReplication {
 
     pub(crate) async fn execute(&mut self, swarm: &mut Swarm<NodeBehaviour>) -> Result<()> {
         // reset network load flag after 72 hours
-        if let Some(last_time) = self.network_is_under_load
-            && Instant::now().duration_since(last_time)
-                > Duration::from_secs(NETWORK_LOAD_TIMEOUT_SECS)
+        if self.network_is_under_load
+            && let Some(last_time) = self.last_replication_time
+            && Instant::now().duration_since(last_time) > Duration::from_secs(72 * 60 * 60)
         {
-            self.network_is_under_load = None;
+            self.network_is_under_load = false;
         }
 
         // add a new records to the queue
@@ -178,9 +174,8 @@ impl NetworkWideReplication {
 
         let mut keys_list = Vec::with_capacity(keys_to_send);
         for _i in 0..keys_to_send {
-            if let Some(key) = self.pending_records.pop_front() {
-                self.completed_records.push(key.clone());
-                keys_list.push(key);
+            if let Some(_key) = self.pending_records.pop_front() {
+                keys_list.push(_key);
             }
         }
         // Send event to trigger replication
@@ -189,6 +184,7 @@ impl NetworkWideReplication {
             warn!("Failed to send NetworkWideReplication event: {err}");
         } else {
             self.last_replication_time = Some(now);
+            self.network_is_under_load = true;
         }
 
         // Check if we've completed the 7-day cycle (deadline passed and no pending records)

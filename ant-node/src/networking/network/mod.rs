@@ -185,10 +185,6 @@ impl Network {
         self.send_local_swarm_cmd(LocalSwarmCmd::PaymentReceived);
     }
 
-    pub(crate) fn notify_record_not_at_target_location(&self) {
-        self.send_local_swarm_cmd(LocalSwarmCmd::RecordNotAtTargetLocation);
-    }
-
     /// Get `Record` from the local RecordStore
     pub(crate) async fn get_local_record(&self, key: &RecordKey) -> Result<Option<Record>> {
         let (sender, receiver) = oneshot::channel();
