@@ -15,7 +15,6 @@ pub(crate) mod network_wide_replication;
 use ant_bootstrap::BootstrapCacheStore;
 use event::NodeEvent;
 use network_discovery::{NETWORK_DISCOVER_INTERVAL, NetworkDiscovery};
-use rand::Rng;
 
 use crate::networking::driver::network_wide_replication::NetworkWideReplication;
 #[cfg(feature = "open-metrics")]
@@ -186,11 +185,7 @@ impl SwarmDriver {
         let mut relay_manager_reservation_interval = interval(RELAY_MANAGER_RESERVATION_INTERVAL);
         let mut bootstrap_interval = Some(interval(BOOTSTRAP_CHECK_INTERVAL));
         let mut dial_queue_check_interval = interval(DIAL_QUEUE_CHECK_INTERVAL);
-        let network_wide_replication = duration_with_variance(
-            NETWORK_WIDE_REPLICATION_INTERVAL,
-            10, // 10% variance
-        );
-        let mut network_wide_replication_interval = interval(network_wide_replication);
+        let mut network_wide_replication_interval = interval(NETWORK_WIDE_REPLICATION_INTERVAL);
         let _ = dial_queue_check_interval.tick().await; // first tick completes immediately
 
         let mut round_robin_index = 0;
@@ -573,18 +568,6 @@ impl SwarmDriver {
         }
 
         Ok(())
-    }
-}
-
-/// Returns a new duration that is within +/- variance of the provided duration.
-fn duration_with_variance(duration: Duration, variance: u32) -> Duration {
-    let variance = duration.as_secs() as f64 * (variance as f64 / 100.0);
-
-    let random_adjustment = Duration::from_secs(rand::thread_rng().gen_range(0..variance as u64));
-    if random_adjustment.as_secs().is_multiple_of(2) {
-        duration.saturating_sub(random_adjustment)
-    } else {
-        duration.saturating_add(random_adjustment)
     }
 }
 
