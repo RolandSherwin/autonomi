@@ -354,7 +354,6 @@ impl ReplicationFetcher {
             incoming_keys,
             locally_stored_keys,
             closest_peers,
-            #[cfg(feature = "open-metrics")]
             metrics_recorder,
         );
 
