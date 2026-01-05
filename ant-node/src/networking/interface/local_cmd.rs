@@ -108,6 +108,7 @@ pub(crate) enum LocalSwarmCmd {
     },
     /// Remove an entry from the RecordStore record indexing cache
     /// Typically because record indexing cache is out-of-sync with disk files
+    #[allow(dead_code)]
     RemoveOutOfSyncEntry {
         key: RecordKey,
     },

@@ -33,6 +33,7 @@ pub(crate) struct NodeMetricsRecorder {
     /// replication
     replication_triggered: Counter,
     replication_keys_to_fetch: Histogram,
+    #[allow(dead_code)]
     pub(crate) network_wide_replication_holders: Histogram,
 
     // routing table

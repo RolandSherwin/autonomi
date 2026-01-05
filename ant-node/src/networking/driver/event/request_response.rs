@@ -366,8 +366,6 @@ impl SwarmDriver {
                 .set(REPLICATION_SENDER_EXTENDED_DISTANCE_MULTIPLIER as i64);
         }
 
-        let mut within_closest_group = true; // set to false below if checks fail
-        let mut within_extended_distance_range = false; // set to true below if checks pass
         if !closest_40_peers
             .iter()
             .any(|(peer_id, _)| peer_id == &holder)

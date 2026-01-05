@@ -655,10 +655,6 @@ impl NodeRecordStore {
         &self.records
     }
 
-    pub(crate) fn count(&self) -> usize {
-        self.records.len()
-    }
-
     /// The follow up to `put_verified`, this only registers the RecordKey
     /// in the RecordStore records set. After this it should be safe
     /// to return the record as stored.
@@ -916,7 +912,7 @@ impl RecordStore for NodeRecordStore {
 
             // The pruning has to be undertaken in an async way.
             let cloned_cmd_sender = self.local_swarm_cmd_sender.clone();
-            let cmd = LocalSwarmCmd::RemoveOutOfSyncEntry { key: k.clone() };
+            let cmd = LocalSwarmCmd::RemoveFailedLocalRecord { key: k.clone() };
 
             send_local_swarm_cmd(cloned_cmd_sender, cmd);
         }
