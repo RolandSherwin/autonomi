@@ -477,13 +477,18 @@ pub(crate) fn send_local_swarm_cmd(
 
 // A standard way to log connection id & the action performed on it.
 pub(crate) fn connection_action_logging(
-    remote_peer_id: &PeerId,
+    remote_peer_id: Option<&PeerId>,
     self_peer_id: &PeerId,
     connection_id: &ConnectionId,
     action_string: &str,
 ) {
     // ELK logging. Do not update without proper testing.
+    // Use PeerId("") for unknown peers - telegraf regex expects this format
+    // but will result in null/empty field when peer_id is not 52 chars
+    let remote = remote_peer_id
+        .map(|p| format!("{p:?}"))
+        .unwrap_or_else(|| "PeerId(\"\")".to_string());
     info!(
-        "Action: {action_string}, performed on: {connection_id:?}, remote_peer_id: {remote_peer_id:?}, self_peer_id: {self_peer_id:?}"
+        "Action: {action_string}, performed on: {connection_id:?}, remote_peer_id: {remote}, self_peer_id: {self_peer_id:?}"
     );
 }

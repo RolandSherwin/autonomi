@@ -11,6 +11,7 @@ use crate::networking::{
     NetworkEvent, NodeIssue, Result,
     error::{dial_error_to_str, listen_error_to_str},
     interface::TerminateNodeReason,
+    network::connection_action_logging,
 };
 use itertools::Itertools;
 #[cfg(feature = "open-metrics")]
@@ -20,7 +21,7 @@ use libp2p::{
     core::ConnectedPoint,
     multiaddr::Protocol,
     swarm::{
-        ConnectionId, DialError, SwarmEvent,
+        ConnectionError, ConnectionId, DialError, SwarmEvent,
         dial_opts::{DialOpts, PeerCondition},
     },
 };
@@ -254,6 +255,19 @@ impl SwarmDriver {
                 event_string = "ConnectionEstablished";
                 debug!(%peer_id, num_established, ?concurrent_dial_errors, "ConnectionEstablished ({connection_id:?}) in {established_in:?}: {}", endpoint_str(&endpoint));
 
+                // ELK logging. Do not update without proper testing.
+                let direction = if endpoint.is_dialer() {
+                    "Outbound"
+                } else {
+                    "Inbound"
+                };
+                connection_action_logging(
+                    Some(&peer_id),
+                    &self.self_peer_id,
+                    &connection_id,
+                    &format!("Connection::Established::{direction}"),
+                );
+
                 self.bootstrap.on_connection_established(
                     &peer_id,
                     &endpoint,
@@ -300,6 +314,20 @@ impl SwarmDriver {
             } => {
                 event_string = "ConnectionClosed";
                 debug!(%peer_id, ?connection_id, ?cause, num_established, "ConnectionClosed: {}", endpoint_str(&endpoint));
+
+                // ELK logging. Do not update without proper testing.
+                let result = match &cause {
+                    None => "Ok".to_string(),
+                    Some(ConnectionError::KeepAliveTimeout) => "Err::KeepAliveTimeout".to_string(),
+                    Some(ConnectionError::IO(_)) => "Err::IO".to_string(),
+                };
+                connection_action_logging(
+                    Some(&peer_id),
+                    &self.self_peer_id,
+                    &connection_id,
+                    &format!("Connection::Closed::{result}"),
+                );
+
                 let _ = self.live_connected_peers.remove(&connection_id);
 
                 if num_established == 0 && self.connected_relay_clients.remove(&peer_id) {
@@ -323,6 +351,7 @@ impl SwarmDriver {
                 let remote_peer = "";
                 // ELK logging. Do not update without proper testing.
                 for (error_str, level) in dial_error_to_str(&error) {
+                    // Legacy logging for tail.connection_error (backwards compatibility)
                     match level {
                         tracing::Level::ERROR => error!(
                             "Node {:?} Remote {remote_peer:?} - Outgoing Connection Error - {error_str:?}",
@@ -333,6 +362,13 @@ impl SwarmDriver {
                             self.self_peer_id,
                         ),
                     }
+                    // New logging for tail.connection_action with connection_id
+                    connection_action_logging(
+                        None,
+                        &self.self_peer_id,
+                        &connection_id,
+                        &format!("Connection::OutgoingError::{error_str}"),
+                    );
                 }
 
                 self.record_connection_metrics();
@@ -355,6 +391,7 @@ impl SwarmDriver {
 
                 // ELK logging. Do not update without proper testing.
                 for (error_str, level) in dial_error_to_str(&error) {
+                    // Legacy logging for tail.connection_error (backwards compatibility)
                     match level {
                         tracing::Level::ERROR => error!(
                             "Node {:?} Remote {failed_peer_id:?} - Outgoing Connection Error - {error_str:?}",
@@ -365,6 +402,13 @@ impl SwarmDriver {
                             self.self_peer_id,
                         ),
                     }
+                    // New logging for tail.connection_action with connection_id
+                    connection_action_logging(
+                        Some(&failed_peer_id),
+                        &self.self_peer_id,
+                        &connection_id,
+                        &format!("Connection::OutgoingError::{error_str}"),
+                    );
                 }
                 let _ = self.live_connected_peers.remove(&connection_id);
                 self.record_connection_metrics();
@@ -535,6 +579,7 @@ impl SwarmDriver {
 
                 // ELK logging. Do not update without proper testing.
                 let (error_str, level) = listen_error_to_str(&error);
+                // Legacy logging for tail.connection_error (backwards compatibility)
                 match level {
                     tracing::Level::ERROR => error!(
                         "Node {:?} Remote {peer_id:?} - Incoming Connection Error - {error_str:?}",
@@ -545,6 +590,13 @@ impl SwarmDriver {
                         self.self_peer_id,
                     ),
                 }
+                // New logging for tail.connection_action with connection_id
+                connection_action_logging(
+                    peer_id.as_ref(),
+                    &self.self_peer_id,
+                    &connection_id,
+                    &format!("Connection::IncomingError::{error_str}"),
+                );
 
                 #[cfg(feature = "open-metrics")]
                 if let Some(relay_manager) = self.relay_manager.as_mut() {
