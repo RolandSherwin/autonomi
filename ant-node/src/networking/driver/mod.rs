@@ -33,7 +33,7 @@ use futures::StreamExt;
 use libp2p::{
     Multiaddr, PeerId,
     kad::{self, K_VALUE, KBucketDistance as Distance, QueryId},
-    request_response::OutboundRequestId,
+    request_response::{InboundRequestId, OutboundRequestId},
     swarm::{
         ConnectionId, Swarm,
         dial_opts::{DialOpts, PeerCondition},
@@ -137,6 +137,10 @@ pub(crate) struct SwarmDriver {
         OutboundRequestId,
         Option<oneshot::Sender<Result<(Response, Option<ConnectionInfo>)>>>,
     >,
+    /// Track request types for outbound requests (for ELK logging when response arrives)
+    pub(crate) pending_request_types: HashMap<OutboundRequestId, String>,
+    /// Track request types for inbound requests (for ELK logging when InboundFailure occurs)
+    pub(crate) pending_inbound_request_types: HashMap<InboundRequestId, String>,
     /// A list of the most recent peers we have dialed ourselves. Old dialed peers are evicted once the vec fills up.
     pub(crate) dialed_peers: CircularVec<PeerId>,
     pub(crate) dial_queue: HashMap<PeerId, (Addresses, Instant, usize)>,

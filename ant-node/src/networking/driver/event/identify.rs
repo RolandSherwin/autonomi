@@ -38,7 +38,7 @@ impl SwarmDriver {
                 let start = Instant::now();
                 // ELK logging. Do not update without proper testing.
                 connection_action_logging(
-                    &peer_id,
+                    Some(&peer_id),
                     &self.self_peer_id,
                     &connection_id,
                     "Identify::Received",
@@ -51,7 +51,7 @@ impl SwarmDriver {
             libp2p::identify::Event::Sent { peer_id, .. } => {
                 // ELK logging. Do not update without proper testing.
                 connection_action_logging(
-                    &peer_id,
+                    Some(&peer_id),
                     &self.self_peer_id,
                     &identify_event.connection_id(),
                     "Identify::Sent",
@@ -61,7 +61,7 @@ impl SwarmDriver {
             libp2p::identify::Event::Pushed { peer_id, .. } => {
                 // ELK logging. Do not update without proper testing.
                 connection_action_logging(
-                    &peer_id,
+                    Some(&peer_id),
                     &self.self_peer_id,
                     &identify_event.connection_id(),
                     "Identify::Pushed",
@@ -72,7 +72,7 @@ impl SwarmDriver {
             libp2p::identify::Event::Error { peer_id, .. } => {
                 // ELK logging. Do not update without proper testing.
                 connection_action_logging(
-                    &peer_id,
+                    Some(&peer_id),
                     &self.self_peer_id,
                     &identify_event.connection_id(),
                     "Identify::Error",
