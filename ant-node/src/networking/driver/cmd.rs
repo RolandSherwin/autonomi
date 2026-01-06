@@ -12,11 +12,12 @@ use crate::networking::{
     error::{NetworkError, Result},
     interface::{LocalSwarmCmd, NetworkSwarmCmd, TerminateNodeReason},
     log_markers::Marker,
+    network::connection_action_logging,
 };
 use ant_evm::PaymentQuote;
 use ant_protocol::{
     NetworkAddress, PrettyPrintRecordKey,
-    messages::{Cmd, Request},
+    messages::{Cmd, QueryResponse, Request, Response},
     storage::{DataTypes, RecordHeader, RecordKind, ValidationType},
 };
 use libp2p::{
@@ -82,6 +83,41 @@ impl SwarmDriver {
                         trace!("Replicate cmd to self received, ignoring");
                     }
                 } else {
+                    // Extract request type for ELK logging before consuming req
+                    // Prefix with "Outgoing::" to indicate outbound direction (matches tail.direction values)
+                    let request_type = match &req {
+                        Request::Cmd(cmd) => match cmd {
+                            Cmd::Replicate { .. } => "Outgoing::Request::Cmd::Replicate",
+                            Cmd::FreshReplicate { .. } => "Outgoing::Request::Cmd::FreshReplicate",
+                            Cmd::PeerConsideredAsBad { .. } => {
+                                "Outgoing::Request::Cmd::PeerConsideredAsBad"
+                            }
+                        },
+                        Request::Query(query) => match query {
+                            ant_protocol::messages::Query::PutRecord { .. } => {
+                                "Outgoing::Request::Query::PutRecord"
+                            }
+                            ant_protocol::messages::Query::GetStoreQuote { .. } => {
+                                "Outgoing::Request::Query::GetStoreQuote"
+                            }
+                            ant_protocol::messages::Query::GetReplicatedRecord { .. } => {
+                                "Outgoing::Request::Query::GetReplicatedRecord"
+                            }
+                            ant_protocol::messages::Query::GetChunkExistenceProof { .. } => {
+                                "Outgoing::Request::Query::GetChunkExistenceProof"
+                            }
+                            ant_protocol::messages::Query::CheckNodeInProblem(_) => {
+                                "Outgoing::Request::Query::CheckNodeInProblem"
+                            }
+                            ant_protocol::messages::Query::GetClosestPeers { .. } => {
+                                "Outgoing::Request::Query::GetClosestPeers"
+                            }
+                            ant_protocol::messages::Query::GetVersion(..) => {
+                                "Outgoing::Request::Query::GetVersion"
+                            }
+                        },
+                    };
+
                     let addresses = if addrs.0.is_empty() {
                         // The input addrs is a default one, try to fetch from local.
                         self.fetch_peer_addresses_from_local(peer)
@@ -103,6 +139,9 @@ impl SwarmDriver {
 
                     trace!("Sending request {request_id:?} to peer {peer:?}");
                     let _ = self.pending_requests.insert(request_id, sender);
+                    let _ = self
+                        .pending_request_types
+                        .insert(request_id, request_type.to_string());
 
                     trace!("Pending Requests now: {:?}", self.pending_requests.len());
                 }
@@ -126,7 +165,60 @@ impl SwarmDriver {
                             }
                         }
                     }
-                    MsgResponder::FromPeer(channel) => {
+                    MsgResponder::FromPeer {
+                        channel,
+                        peer,
+                        connection_id,
+                    } => {
+                        // ELK logging for Query responses. Do not update without proper testing.
+                        // Only log Query responses here; Cmd responses are logged in request_response.rs
+                        if let Response::Query(query_resp) = &resp {
+                            let action_string: String = match query_resp {
+                                QueryResponse::GetReplicatedRecord(result) => match result {
+                                    Ok(_) => "Outgoing::Response::Query::GetReplicatedRecord::Ok"
+                                        .to_string(),
+                                    Err(e) => format!(
+                                        "Outgoing::Response::Query::GetReplicatedRecord::Err::{}",
+                                        error_reason(e)
+                                    ),
+                                },
+                                QueryResponse::GetChunkExistenceProof(_) => {
+                                    "Outgoing::Response::Query::GetChunkExistenceProof".to_string()
+                                }
+                                QueryResponse::CheckNodeInProblem { .. } => {
+                                    "Outgoing::Response::Query::CheckNodeInProblem".to_string()
+                                }
+                                QueryResponse::GetClosestPeers { .. } => {
+                                    "Outgoing::Response::Query::GetClosestPeers".to_string()
+                                }
+                                QueryResponse::GetVersion { .. } => {
+                                    "Outgoing::Response::Query::GetVersion".to_string()
+                                }
+                                QueryResponse::GetStoreQuote { quote, .. } => match quote {
+                                    Ok(_) => {
+                                        "Outgoing::Response::Query::GetStoreQuote::Ok".to_string()
+                                    }
+                                    Err(e) => format!(
+                                        "Outgoing::Response::Query::GetStoreQuote::Err::{}",
+                                        error_reason(e)
+                                    ),
+                                },
+                                QueryResponse::PutRecord { result, .. } => match result {
+                                    Ok(_) => "Outgoing::Response::Query::PutRecord::Ok".to_string(),
+                                    Err(e) => format!(
+                                        "Outgoing::Response::Query::PutRecord::Err::{}",
+                                        error_reason(e)
+                                    ),
+                                },
+                            };
+                            connection_action_logging(
+                                Some(&peer),
+                                &self.self_peer_id,
+                                &connection_id,
+                                &action_string,
+                            );
+                        }
+
                         self.swarm
                             .behaviour_mut()
                             .request_response
@@ -822,4 +914,27 @@ fn get_peers_in_range(
             }
         })
         .collect()
+}
+
+/// Returns a specific error reason for layer 3 breakdown logging in ELK.
+/// This provides granular visibility into WHY operations failed, not just that they failed.
+fn error_reason(err: &ant_protocol::Error) -> &'static str {
+    use ant_protocol::Error::*;
+    match err {
+        // PutRecord errors
+        PutRecordFailed(_) => "PutRecordFailed",
+        OutdatedRecordCounter { .. } => "OutdatedRecordCounter",
+        RecordExists(_) => "RecordExists",
+        RecordHeaderParsingFailed => "RecordHeaderParsingFailed",
+        RecordParsingFailed => "RecordParsingFailed",
+        // GetStoreQuote errors
+        GetStoreQuoteFailed => "GetStoreQuoteFailed",
+        QuoteGenerationFailed => "QuoteGenerationFailed",
+        // GetReplicatedRecord errors
+        ReplicatedRecordNotFound { .. } => "ReplicatedRecordNotFound",
+        // ChunkProof errors
+        ChunkDoesNotExist(_) => "ChunkDoesNotExist",
+        // Fallback for any other/new error types
+        _ => "Unknown",
+    }
 }
