@@ -41,51 +41,67 @@ impl SwarmDriver {
                     ..
                 } => {
                     // ELK logging. Do not update without proper testing.
-                    let action_string = match &request {
+                    // Prefix with "Incoming::" to indicate inbound direction
+                    // Layer 3: PeerConsideredAsBad includes the bad_behaviour reason
+                    let action_string: String = match &request {
                         Request::Cmd(cmd) => match cmd {
                             ant_protocol::messages::Cmd::Replicate { .. } => {
-                                "Request::Cmd::Replicate"
+                                "Incoming::Request::Cmd::Replicate".to_string()
                             }
                             ant_protocol::messages::Cmd::FreshReplicate { .. } => {
-                                "Request::Cmd::FreshReplicate"
+                                "Incoming::Request::Cmd::FreshReplicate".to_string()
                             }
-                            ant_protocol::messages::Cmd::PeerConsideredAsBad { .. } => {
-                                "Request::Cmd::PeerConsideredAsBad"
+                            ant_protocol::messages::Cmd::PeerConsideredAsBad { bad_behaviour, .. } => {
+                                // Layer 3: Include the reason why peer was flagged as bad
+                                format!("Incoming::Request::Cmd::PeerConsideredAsBad::{}", bad_behaviour)
                             }
                         },
                         Request::Query(query) => match query {
                             ant_protocol::messages::Query::PutRecord { .. } => {
-                                "Request::Query::PutRecord"
+                                "Incoming::Request::Query::PutRecord".to_string()
                             }
                             ant_protocol::messages::Query::GetStoreQuote { .. } => {
-                                "Request::Query::GetStoreQuote"
+                                "Incoming::Request::Query::GetStoreQuote".to_string()
                             }
                             ant_protocol::messages::Query::GetReplicatedRecord { .. } => {
-                                "Request::Query::GetReplicatedRecord"
+                                "Incoming::Request::Query::GetReplicatedRecord".to_string()
                             }
                             ant_protocol::messages::Query::GetChunkExistenceProof { .. } => {
-                                "Request::Query::GetChunkExistenceProof"
+                                "Incoming::Request::Query::GetChunkExistenceProof".to_string()
                             }
                             ant_protocol::messages::Query::CheckNodeInProblem(_) => {
-                                "Request::Query::CheckNodeInProblem"
+                                "Incoming::Request::Query::CheckNodeInProblem".to_string()
                             }
                             ant_protocol::messages::Query::GetClosestPeers { .. } => {
-                                "Request::Query::GetClosestPeers"
+                                "Incoming::Request::Query::GetClosestPeers".to_string()
                             }
                             ant_protocol::messages::Query::GetVersion(..) => {
-                                "Request::Query::GetVersion"
+                                "Incoming::Request::Query::GetVersion".to_string()
                             }
                             ant_protocol::messages::Query::GetMerkleCandidateQuote { .. } => {
-                                "Request::Query::GetMerkleCandidateQuote"
+                                "Incoming::Request::Query::GetMerkleCandidateQuote".to_string()
                             }
                         },
                     };
+                    // ELK logging: Log generic libp2p-layer RequestReceived event
                     connection_action_logging(
-                        &peer,
+                        Some(&peer),
                         &self.self_peer_id,
                         &connection_id,
-                        action_string,
+                        "RequestResponse::RequestReceived",
                     );
+                    // ELK logging: Log specific antnode-layer request type
+                    connection_action_logging(
+                        Some(&peer),
+                        &self.self_peer_id,
+                        &connection_id,
+                        &action_string,
+                    );
+
+                    // Track inbound request type for ELK logging when InboundFailure occurs
+                    let _ = self
+                        .pending_inbound_request_types
+                        .insert(request_id, action_string.clone());
 
                     debug!("Received request {request_id:?} from peer {peer:?}, req: {request:?}");
                     // If the request is replication or quote verification,
@@ -97,9 +113,21 @@ impl SwarmDriver {
                                 ant_protocol::messages::CmdResponse::Replicate(Ok(())),
                             );
 
+                            // ELK logging. Do not update without proper testing.
+                            connection_action_logging(
+                                Some(&peer),
+                                &self.self_peer_id,
+                                &connection_id,
+                                "Outgoing::Response::Cmd::Replicate::Ok",
+                            );
+
                             self.queue_network_swarm_cmd(NetworkSwarmCmd::SendResponse {
                                 resp: response,
-                                channel: MsgResponder::FromPeer(channel),
+                                channel: MsgResponder::FromPeer {
+                                    channel,
+                                    peer,
+                                    connection_id,
+                                },
                             });
 
                             self.add_keys_to_replication_fetcher(holder, keys, false)?;
@@ -112,9 +140,21 @@ impl SwarmDriver {
                                 ant_protocol::messages::CmdResponse::FreshReplicate(Ok(())),
                             );
 
+                            // ELK logging. Do not update without proper testing.
+                            connection_action_logging(
+                                Some(&peer),
+                                &self.self_peer_id,
+                                &connection_id,
+                                "Outgoing::Response::Cmd::FreshReplicate::Ok",
+                            );
+
                             self.queue_network_swarm_cmd(NetworkSwarmCmd::SendResponse {
                                 resp: response,
-                                channel: MsgResponder::FromPeer(channel),
+                                channel: MsgResponder::FromPeer {
+                                    channel,
+                                    peer,
+                                    connection_id,
+                                },
                             });
 
                             self.send_event(NetworkEvent::FreshReplicateToFetch { holder, keys });
@@ -128,9 +168,21 @@ impl SwarmDriver {
                                 ant_protocol::messages::CmdResponse::PeerConsideredAsBad(Ok(())),
                             );
 
+                            // ELK logging. Do not update without proper testing.
+                            connection_action_logging(
+                                Some(&peer),
+                                &self.self_peer_id,
+                                &connection_id,
+                                "Outgoing::Response::Cmd::PeerConsideredAsBad::Ok",
+                            );
+
                             self.queue_network_swarm_cmd(NetworkSwarmCmd::SendResponse {
                                 resp: response,
-                                channel: MsgResponder::FromPeer(channel),
+                                channel: MsgResponder::FromPeer {
+                                    channel,
+                                    peer,
+                                    connection_id,
+                                },
                             });
 
                             let (Some(detected_by), Some(bad_peer)) =
@@ -158,7 +210,11 @@ impl SwarmDriver {
                         Request::Query(query) => {
                             self.send_event(NetworkEvent::QueryRequestReceived {
                                 query,
-                                channel: MsgResponder::FromPeer(channel),
+                                channel: MsgResponder::FromPeer {
+                                    channel,
+                                    peer,
+                                    connection_id,
+                                },
                             })
                         }
                     }
@@ -168,58 +224,94 @@ impl SwarmDriver {
                     response,
                 } => {
                     // ELK logging. Do not update without proper testing.
+                    // Prefix with "Incoming::" to indicate inbound direction
+                    // Layer 3: Error responses include specific error reason for granular breakdown
                     let action_string = match &response {
                         Response::Cmd(cmd_response) => match cmd_response {
                             CmdResponse::Replicate(result) => {
-                                format!("Response::Cmd::Replicate::{}", result_to_str(result))
+                                format!("Incoming::Response::Cmd::Replicate::{}", result_to_str(result))
                             }
                             CmdResponse::FreshReplicate(result) => {
-                                format!("Response::Cmd::FreshReplicate::{}", result_to_str(result))
+                                format!("Incoming::Response::Cmd::FreshReplicate::{}", result_to_str(result))
                             }
                             CmdResponse::PeerConsideredAsBad(result) => format!(
-                                "Response::Cmd::PeerConsideredAsBad::{}",
+                                "Incoming::Response::Cmd::PeerConsideredAsBad::{}",
                                 result_to_str(result)
                             ),
                         },
                         Response::Query(query_response) => match query_response {
+                            // Layer 3: PutRecord errors include specific reason
                             ant_protocol::messages::QueryResponse::PutRecord { result, .. } => {
-                                format!("Response::Query::PutRecord::{}", result_to_str(result))
+                                match result {
+                                    Ok(_) => "Incoming::Response::Query::PutRecord::Ok".to_string(),
+                                    Err(e) => format!("Incoming::Response::Query::PutRecord::Err::{}", error_reason(e)),
+                                }
                             }
+                            // Layer 3: GetStoreQuote errors include specific reason
                             ant_protocol::messages::QueryResponse::GetStoreQuote {
                                 quote, ..
                             } => {
-                                format!("Response::Query::GetStoreQuote::{}", result_to_str(quote))
+                                match quote {
+                                    Ok(_) => "Incoming::Response::Query::GetStoreQuote::Ok".to_string(),
+                                    Err(e) => format!("Incoming::Response::Query::GetStoreQuote::Err::{}", error_reason(e)),
+                                }
                             }
                             ant_protocol::messages::QueryResponse::CheckNodeInProblem {
                                 ..
-                            } => "Response::Query::CheckNodeInProblem".to_string(),
+                            } => "Incoming::Response::Query::CheckNodeInProblem".to_string(),
+                            // Layer 3: GetReplicatedRecord errors include specific reason
                             ant_protocol::messages::QueryResponse::GetReplicatedRecord(result) => {
-                                format!(
-                                    "Response::Query::GetReplicatedRecord::{}",
-                                    result_to_str(result)
-                                )
+                                match result {
+                                    Ok(_) => "Incoming::Response::Query::GetReplicatedRecord::Ok".to_string(),
+                                    Err(e) => format!("Incoming::Response::Query::GetReplicatedRecord::Err::{}", error_reason(e)),
+                                }
                             }
                             ant_protocol::messages::QueryResponse::GetChunkExistenceProof(_) => {
-                                "Response::Query::GetChunkExistenceProof".to_string()
+                                "Incoming::Response::Query::GetChunkExistenceProof".to_string()
                             }
                             ant_protocol::messages::QueryResponse::GetClosestPeers { .. } => {
-                                "Response::Query::GetClosestPeers".to_string()
+                                "Incoming::Response::Query::GetClosestPeers".to_string()
                             }
                             ant_protocol::messages::QueryResponse::GetVersion { .. } => {
-                                "Response::Query::GetVersion".to_string()
+                                "Incoming::Response::Query::GetVersion".to_string()
                             }
+                            // Layer 3: GetMerkleCandidateQuote errors include specific reason
                             ant_protocol::messages::QueryResponse::GetMerkleCandidateQuote(
                                 result,
                             ) => {
-                                format!(
-                                    "Response::Query::GetMerkleCandidateQuote::{}",
-                                    result_to_str(result)
-                                )
+                                match result {
+                                    Ok(_) => "Incoming::Response::Query::GetMerkleCandidateQuote::Ok".to_string(),
+                                    Err(e) => format!("Incoming::Response::Query::GetMerkleCandidateQuote::Err::{}", error_reason(e)),
+                                }
                             }
                         },
                     };
+                    // ELK logging: Log generic libp2p-layer RequestSent event (logged at response time when connection_id is available)
                     connection_action_logging(
-                        &peer,
+                        Some(&peer),
+                        &self.self_peer_id,
+                        &connection_id,
+                        "RequestResponse::RequestSent",
+                    );
+                    // ELK logging: Log the specific antnode-layer outbound request type
+                    if let Some(request_type) = self.pending_request_types.remove(&request_id) {
+                        connection_action_logging(
+                            Some(&peer),
+                            &self.self_peer_id,
+                            &connection_id,
+                            &request_type,
+                        );
+                    }
+                    // ELK logging: Log generic libp2p-layer ResponseReceived event
+                    connection_action_logging(
+                        Some(&peer),
+                        &self.self_peer_id,
+                        &connection_id,
+                        "RequestResponse::ResponseReceived",
+                    );
+                    // ELK logging: Log the specific antnode-layer inbound response type
+                    connection_action_logging(
+                        Some(&peer),
                         &self.self_peer_id,
                         &connection_id,
                         &action_string,
@@ -270,12 +362,46 @@ impl SwarmDriver {
                 peer,
                 connection_id,
             } => {
-                // ELK logging. Do not update without proper testing.
+                // ELK logging: Log generic libp2p-layer RequestSent event (failed requests still count as sent)
                 connection_action_logging(
-                    &peer,
+                    Some(&peer),
                     &self.self_peer_id,
                     &connection_id,
-                    "RequestResponse::OutboundFailure",
+                    "RequestResponse::RequestSent",
+                );
+                // ELK logging: Log the outbound request type that failed
+                // First log antnode-layer request type (Outgoing::Request::*) for consistency with success path
+                // Then log libp2p-layer failure request type (OutboundFailure::RequestType::*)
+                if let Some(request_type) = self.pending_request_types.remove(&request_id) {
+                    // Log antnode-layer request type (matches success path, ensures out_req_* counts include failures)
+                    connection_action_logging(
+                        Some(&peer),
+                        &self.self_peer_id,
+                        &connection_id,
+                        &request_type,
+                    );
+                    // Log libp2p-layer failure with request type
+                    let request_type_suffix = request_type.trim_start_matches("Outgoing::Request::");
+                    connection_action_logging(
+                        Some(&peer),
+                        &self.self_peer_id,
+                        &connection_id,
+                        &format!("RequestResponse::OutboundFailure::RequestType::{request_type_suffix}"),
+                    );
+                }
+                // ELK logging: Log the failure type
+                let error_type = match &error {
+                    request_response::OutboundFailure::DialFailure => "DialFailure",
+                    request_response::OutboundFailure::Timeout => "Timeout",
+                    request_response::OutboundFailure::ConnectionClosed => "ConnectionClosed",
+                    request_response::OutboundFailure::UnsupportedProtocols => "UnsupportedProtocols",
+                    request_response::OutboundFailure::Io(_) => "Io",
+                };
+                connection_action_logging(
+                    Some(&peer),
+                    &self.self_peer_id,
+                    &connection_id,
+                    &format!("RequestResponse::OutboundFailure::{error_type}"),
                 );
                 if let Some(sender) = self.pending_requests.remove(&request_id) {
                     match sender {
@@ -304,13 +430,37 @@ impl SwarmDriver {
                 error,
                 connection_id,
             } => {
-                // ELK logging. Do not update without proper testing.
+                // ELK logging: Log the inbound request type that failed (if tracked)
+                let request_type = self.pending_inbound_request_types.remove(&request_id);
+
+                // ELK logging: Log the failure type
+                let error_type = match &error {
+                    request_response::InboundFailure::Timeout => "Timeout",
+                    request_response::InboundFailure::ConnectionClosed => "ConnectionClosed",
+                    request_response::InboundFailure::UnsupportedProtocols => "UnsupportedProtocols",
+                    request_response::InboundFailure::ResponseOmission => "ResponseOmission",
+                    request_response::InboundFailure::Io(_) => "Io",
+                };
                 connection_action_logging(
-                    &peer,
+                    Some(&peer),
                     &self.self_peer_id,
                     &connection_id,
-                    "RequestResponse::InboundFailure",
+                    &format!("RequestResponse::InboundFailure::{error_type}"),
                 );
+
+                // ELK logging: Log the request type that we failed to respond to
+                // Extract just the request type suffix (e.g., "Cmd::Replicate" from "Incoming::Request::Cmd::Replicate")
+                let request_type_suffix = request_type
+                    .as_ref()
+                    .map(|rt| rt.trim_start_matches("Incoming::Request::"))
+                    .unwrap_or("Unknown");
+                connection_action_logging(
+                    Some(&peer),
+                    &self.self_peer_id,
+                    &connection_id,
+                    &format!("RequestResponse::InboundFailure::RequestType::{request_type_suffix}"),
+                );
+
                 warn!(
                     "RequestResponse: InboundFailure for request_id: {request_id:?} and peer: {peer:?}, with error: {error:?}"
                 );
@@ -320,9 +470,12 @@ impl SwarmDriver {
                 request_id,
                 connection_id,
             } => {
+                // Clean up inbound request type tracking (response sent successfully)
+                let _ = self.pending_inbound_request_types.remove(&request_id);
+
                 // ELK logging. Do not update without proper testing.
                 connection_action_logging(
-                    &peer,
+                    Some(&peer),
                     &self.self_peer_id,
                     &connection_id,
                     "RequestResponse::ResponseSent",
@@ -417,5 +570,33 @@ fn result_to_str<T>(result: &Result<T, ant_protocol::Error>) -> &'static str {
     match result {
         Ok(_) => "Ok",
         Err(_) => "Err",
+    }
+}
+
+/// Returns a specific error reason for layer 3 breakdown logging in ELK.
+/// This provides granular visibility into WHY operations failed, not just that they failed.
+fn error_reason(err: &ant_protocol::Error) -> &'static str {
+    use ant_protocol::Error::*;
+    match err {
+        // PutRecord errors
+        PutRecordFailed(_) => "PutRecordFailed",
+        OutdatedRecordCounter { .. } => "OutdatedRecordCounter",
+        RecordExists(_) => "RecordExists",
+        RecordHeaderParsingFailed => "RecordHeaderParsingFailed",
+        RecordParsingFailed => "RecordParsingFailed",
+        // GetStoreQuote errors
+        GetStoreQuoteFailed => "GetStoreQuoteFailed",
+        QuoteGenerationFailed => "QuoteGenerationFailed",
+        // GetMerkleCandidateQuote errors
+        GetMerkleCandidateQuoteFailed(_) => "GetMerkleCandidateQuoteFailed",
+        FailedToSignMerkleCandidate(_) => "FailedToSignMerkleCandidate",
+        MerklePaymentVerificationFailed(_) => "MerklePaymentVerificationFailed",
+        TopologyVerificationFailed { .. } => "TopologyVerificationFailed",
+        // GetReplicatedRecord errors
+        ReplicatedRecordNotFound { .. } => "ReplicatedRecordNotFound",
+        // ChunkProof errors
+        ChunkDoesNotExist(_) => "ChunkDoesNotExist",
+        // Fallback for any other/new error types
+        _ => "Unknown",
     }
 }
