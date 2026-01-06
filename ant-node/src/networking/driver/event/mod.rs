@@ -18,7 +18,7 @@ use crate::networking::{
 use ant_protocol::messages::ConnectionInfo;
 use custom_debug::Debug as CustomDebug;
 use libp2p::kad::K_VALUE;
-use libp2p::{PeerId, request_response::ResponseChannel as PeerResponseChannel};
+use libp2p::{PeerId, request_response::ResponseChannel as PeerResponseChannel, swarm::ConnectionId};
 
 use ant_protocol::CLOSE_GROUP_SIZE;
 use ant_protocol::{
@@ -123,7 +123,12 @@ pub(crate) enum MsgResponder {
     /// Respond to a request from `self` through a simple one-shot channel.
     FromSelf(Option<oneshot::Sender<Result<(Response, Option<ConnectionInfo>)>>>),
     /// Respond to a request from a peer in the network.
-    FromPeer(PeerResponseChannel<Response>),
+    /// Includes peer_id and connection_id for ELK connection action logging.
+    FromPeer {
+        channel: PeerResponseChannel<Response>,
+        peer: PeerId,
+        connection_id: ConnectionId,
+    },
 }
 
 impl SwarmDriver {
