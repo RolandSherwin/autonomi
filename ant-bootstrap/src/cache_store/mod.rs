@@ -9,7 +9,7 @@
 pub mod cache_data_v0;
 pub mod cache_data_v1;
 
-use crate::{BootstrapCacheConfig, Error, Result, craft_valid_multiaddr};
+use crate::{BootstrapCacheConfig, Error, Result, craft_valid_multiaddr, multiaddr_get_peer_id};
 use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
 use rand::Rng;
 use std::{fs, sync::Arc, time::Duration};
@@ -83,9 +83,8 @@ impl BootstrapCacheStore {
         let Some(addr) = craft_valid_multiaddr(&addr) else {
             return;
         };
-        let peer_id = match addr.iter().find(|p| matches!(p, Protocol::P2p(_))) {
-            Some(Protocol::P2p(id)) => id,
-            _ => return,
+        let Some(peer_id) = multiaddr_get_peer_id(&addr) else {
+            return;
         };
 
         debug!("Adding addr to bootstrap cache: {addr}");

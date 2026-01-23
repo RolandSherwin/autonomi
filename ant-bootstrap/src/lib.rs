@@ -33,7 +33,6 @@ mod initial_peers;
 
 use ant_protocol::version::{get_network_id_str, get_truncate_version_str};
 use libp2p::{Multiaddr, PeerId, multiaddr::Protocol};
-use thiserror::Error;
 
 pub use cache_store::BootstrapCacheStore;
 pub use config::BootstrapCacheConfig;

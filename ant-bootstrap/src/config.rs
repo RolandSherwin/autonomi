@@ -59,15 +59,14 @@ pub struct BootstrapCacheConfig {
 impl TryFrom<&InitialPeersConfig> for BootstrapCacheConfig {
     type Error = Error;
     fn try_from(config: &InitialPeersConfig) -> Result<Self> {
-        let mut bootstrap_config = BootstrapCacheConfig::empty();
-        bootstrap_config.local = config.local;
-        let cache_dir = if let Some(cache_dir) = &config.bootstrap_cache_dir {
-            cache_dir.clone()
-        } else {
-            default_cache_dir()?
-        };
-        bootstrap_config.cache_dir = cache_dir;
-        Ok(bootstrap_config)
+        let cache_dir = config
+            .bootstrap_cache_dir
+            .clone()
+            .map_or_else(default_cache_dir, Ok)?;
+
+        Ok(BootstrapCacheConfig::empty()
+            .with_local(config.local)
+            .with_cache_dir(cache_dir))
     }
 }
 

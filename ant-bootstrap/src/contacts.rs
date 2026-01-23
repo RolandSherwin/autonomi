@@ -229,17 +229,12 @@ impl ContactsFetcher {
 
     /// Try to parse a response from an endpoint
     fn try_parse_response(response: &str) -> Result<Vec<Multiaddr>> {
-        let cache_data = if let Ok(data) =
-            serde_json::from_str::<super::cache_store::cache_data_v1::CacheData>(response)
-        {
-            Some(data)
-        } else if let Ok(data) =
-            serde_json::from_str::<super::cache_store::cache_data_v0::CacheData>(response)
-        {
-            Some(data.into())
-        } else {
-            None
-        };
+        let cache_data: Option<super::cache_store::cache_data_v1::CacheData> =
+            serde_json::from_str(response).ok().or_else(|| {
+                serde_json::from_str::<super::cache_store::cache_data_v0::CacheData>(response)
+                    .ok()
+                    .map(Into::into)
+            });
 
         match cache_data {
             Some(cache_data) => {
