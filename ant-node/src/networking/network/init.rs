@@ -9,6 +9,10 @@
 use ant_protocol::constants::{KAD_STREAM_PROTOCOL_ID, MAX_PACKET_SIZE, REPLICATION_FACTOR};
 
 use crate::ReachabilityStatus;
+#[cfg(feature = "open-metrics")]
+use crate::networking::metrics::MetadataExtendedRecorder;
+#[cfg(feature = "open-metrics")]
+use crate::networking::metrics::MetadataRecorder;
 use crate::networking::{
     CLOSE_GROUP_SIZE, NetworkEvent,
     bootstrap::InitialBootstrap,
@@ -18,6 +22,7 @@ use crate::networking::{
         network_discovery::NetworkDiscovery, network_wide_replication::NetworkWideReplication,
     },
     error::{NetworkError, Result},
+    reachability_check::{ReachabilityCheckBehaviour, ReachabilityCheckSwarmDriver},
     record_store::{NodeRecordStore, NodeRecordStoreConfig},
     replication_fetcher::ReplicationFetcher,
     transport,
@@ -29,7 +34,10 @@ use crate::networking::{
 use ant_protocol::{
     NetworkAddress, PrettyPrintKBucketKey,
     messages::{Request, Response},
-    version::{IDENTIFY_PROTOCOL_STR, REQ_RESPONSE_VERSION_STR, get_network_id_str},
+    version::{
+        IDENTIFY_PROTOCOL_STR, IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR,
+        REQ_RESPONSE_VERSION_STR, get_network_id_str,
+    },
 };
 use libp2p::Transport as _;
 use libp2p::core::transport::ListenerId;
@@ -55,7 +63,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 // Timeout for requests sent/received through the request_response behaviour.
 const REQUEST_TIMEOUT_DEFAULT_S: Duration = Duration::from_secs(120);
@@ -107,7 +115,11 @@ pub(crate) struct NetworkConfig {
 /// Returns an error if there is a problem initializing the mDNS behaviour.
 pub(super) fn init_driver(
     config: NetworkConfig,
-) -> Result<(SwarmDriver, mpsc::Receiver<NetworkEvent>)> {
+) -> Result<(
+    SwarmDriver,
+    mpsc::Receiver<NetworkEvent>,
+    Option<watch::Sender<bool>>,
+)> {
     let mut kad_cfg = kad::Config::new(StreamProtocol::new(KAD_STREAM_PROTOCOL_ID));
     let _ = kad_cfg
         .set_kbucket_inserts(libp2p::kad::BucketInserts::Manual)
@@ -177,7 +189,7 @@ pub(super) fn init_driver(
     // Listen on the provided address
     let listen_socket_addr = config.listen_addr;
 
-    let (events_receiver, mut swarm_driver) =
+    let (events_receiver, mut swarm_driver, metrics_shutdown_tx) =
         init_swarm_driver(kad_cfg, store_cfg, ProtocolSupport::Full, config);
 
     // Listen on QUIC
@@ -187,7 +199,7 @@ pub(super) fn init_driver(
     let listener_id = listen_on_with_retry(&mut swarm_driver.swarm, addr_quic.clone())?;
     info!("Listening on QUIC address: {addr_quic:?} on {listener_id}");
 
-    Ok((swarm_driver, events_receiver))
+    Ok((swarm_driver, events_receiver, metrics_shutdown_tx))
 }
 
 /// Private helper to create the network components with the provided config and req/res behaviour
@@ -196,7 +208,11 @@ fn init_swarm_driver(
     record_store_cfg: NodeRecordStoreConfig,
     req_res_protocol: ProtocolSupport,
     config: NetworkConfig,
-) -> (mpsc::Receiver<NetworkEvent>, SwarmDriver) {
+) -> (
+    mpsc::Receiver<NetworkEvent>,
+    SwarmDriver,
+    Option<watch::Sender<bool>>,
+) {
     let identify_protocol_str = IDENTIFY_PROTOCOL_STR
         .read()
         .expect("Failed to obtain read lock for IDENTIFY_PROTOCOL_STR")
@@ -231,7 +247,7 @@ fn init_swarm_driver(
     };
 
     #[cfg(feature = "open-metrics")]
-    let metrics_recorder = if let Some(port) = config.metrics_server_port {
+    let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
         let metrics_recorder =
             NetworkMetricsRecorder::new(&mut metrics_registries, &config.reachability_status);
         let metadata_sub_reg = metrics_registries
@@ -251,12 +267,14 @@ fn init_swarm_driver(
                 identify_protocol_str.clone(),
             )]),
         );
-
-        run_metrics_server(metrics_registries, port);
-        Some(metrics_recorder)
+        let shutdown_tx = run_metrics_server(metrics_registries, port);
+        (Some(metrics_recorder), Some(shutdown_tx))
     } else {
-        None
+        (None, None)
     };
+
+    #[cfg(not(feature = "open-metrics"))]
+    let metrics_shutdown_tx = None;
 
     // RequestResponse Behaviour
     let request_response = {
@@ -393,7 +411,7 @@ fn init_swarm_driver(
         blocklist_cache: CircularVec::new(BLOCKLIST_CACHE_SIZE),
     };
 
-    (network_event_receiver, swarm_driver)
+    (network_event_receiver, swarm_driver, metrics_shutdown_tx)
 }
 
 pub(crate) fn listen_on_with_retry<TBehaviour: libp2p::swarm::NetworkBehaviour>(
@@ -420,6 +438,103 @@ pub(crate) fn listen_on_with_retry<TBehaviour: libp2p::swarm::NetworkBehaviour>(
             }
         }
     }
+}
+
+/// Creates a new reachability check swarm driver.
+///
+/// This swarm is used to verify that the node is externally reachable before
+/// starting the main node swarm. It uses a distinct agent version to trigger
+/// dial-backs from other nodes for reachability verification.
+///
+/// # Returns
+///
+/// A tuple containing the `ReachabilityCheckSwarmDriver` and an optional
+/// metrics shutdown sender (if metrics are enabled).
+pub(crate) async fn init_reachability_check_swarm(
+    config: NetworkConfig,
+) -> Result<(ReachabilityCheckSwarmDriver, Option<watch::Sender<bool>>)> {
+    let identify_protocol_str = IDENTIFY_PROTOCOL_STR
+        .read()
+        .expect("Failed to obtain read lock for IDENTIFY_PROTOCOL_STR")
+        .clone();
+
+    let peer_id = PeerId::from(config.keypair.public());
+    info!(
+        "Self PeerID {peer_id} is represented as kbucket_key {:?}",
+        PrettyPrintKBucketKey(NetworkAddress::from(peer_id).as_kbucket_key())
+    );
+
+    #[cfg(feature = "open-metrics")]
+    let mut metrics_registries = config.metrics_registries;
+
+    // ==== Transport ====
+    #[cfg(feature = "open-metrics")]
+    let transport = transport::build_transport(&config.keypair, &mut metrics_registries);
+    #[cfg(not(feature = "open-metrics"))]
+    let transport = transport::build_transport(&config.keypair);
+
+    #[cfg(feature = "open-metrics")]
+    let (metrics_recorder, metrics_shutdown_tx) = if let Some(port) = config.metrics_server_port {
+        let metrics_recorder =
+            NetworkMetricsRecorder::new(&mut metrics_registries, &config.reachability_status);
+        // set the reachability_check_progress gauge to 1 to denote in progress
+        let _ = metrics_recorder.reachability_check_progress.set(1.0);
+
+        let mut metadata_recorder = MetadataRecorder::new(&mut metrics_registries);
+        metadata_recorder.register_peer_id(&peer_id);
+        metadata_recorder.register_identify_protocol_string(identify_protocol_str.clone());
+        let mut metadata_extended_recorder = MetadataExtendedRecorder::new(&mut metrics_registries);
+        metadata_extended_recorder.register_peer_id(&peer_id);
+        metadata_extended_recorder.register_pid();
+        metadata_extended_recorder.register_bin_version();
+        metadata_extended_recorder.register_root_dir(&config.root_dir);
+        metadata_extended_recorder.register_log_dir(&config.root_dir.join("logs"));
+
+        let shutdown_tx = run_metrics_server(metrics_registries, port);
+        (Some(metrics_recorder), Some(shutdown_tx))
+    } else {
+        (None, None)
+    };
+
+    #[cfg(not(feature = "open-metrics"))]
+    let metrics_shutdown_tx = None;
+
+    // Identify Behaviour
+    let agent_version = IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR
+        .read()
+        .expect("Failed to obtain read lock for IDENTIFY_REACHABILITY_CHECK_CLIENT_VERSION_STR")
+        .clone();
+    info!(
+        "Building Identify with identify_protocol_str: {identify_protocol_str:?} and agent_version: {agent_version:?}"
+    );
+    let identify = {
+        let cfg = libp2p::identify::Config::new(identify_protocol_str, config.keypair.public())
+            .with_agent_version(agent_version)
+            // Enlength the identify interval from default 5 mins to 1 hour.
+            .with_interval(RESEND_IDENTIFY_INVERVAL)
+            .with_hide_listen_addrs(true);
+        libp2p::identify::Behaviour::new(cfg)
+    };
+
+    let behaviour = ReachabilityCheckBehaviour { identify };
+
+    let swarm_config = libp2p::swarm::Config::with_tokio_executor()
+        .with_idle_connection_timeout(CONNECTION_KEEP_ALIVE_TIMEOUT);
+
+    let swarm = Swarm::new(transport, behaviour, peer_id, swarm_config);
+
+    let swarm_driver = ReachabilityCheckSwarmDriver::new(
+        swarm,
+        &config.keypair,
+        config.listen_addr,
+        config.initial_peers,
+        config.no_upnp,
+        #[cfg(feature = "open-metrics")]
+        metrics_recorder,
+    )
+    .await?;
+
+    Ok((swarm_driver, metrics_shutdown_tx))
 }
 
 fn check_and_wipe_storage_dir_if_necessary(
