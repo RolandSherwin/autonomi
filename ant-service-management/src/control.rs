@@ -15,57 +15,7 @@ use std::{
     net::{SocketAddr, TcpListener},
     path::Path,
 };
-use sysinfo::{Pid, ProcessRefreshKind, System, UpdateKind};
-
-/// Normalizes a path by stripping common upgrade-related suffixes.
-///
-/// During in-place binary upgrades on Unix systems, the running process may show patterns like:
-/// - " (deleted)": appears when the binary has been replaced while still running
-/// - ".bak", ".old": common backup file suffixes
-///
-/// This function strips these suffixes to allow matching between the expected path and the actual
-/// running process path.
-fn normalize_path_for_comparison(path: &str) -> String {
-    path.trim_end_matches(" (deleted)")
-        .trim_end_matches(".bak")
-        .trim_end_matches(".old")
-        .to_string()
-}
-
-/// Parse version string from `antnode --version` output.
-///
-/// Expected format: "Autonomi Node v0.4.9" or "Autonomi Node v0.4.10-rc.1"
-/// Nightly format: "Autonomi Node -- Nightly Release 2024.12.03"
-///
-/// Returns `None` if the version cannot be parsed.
-fn parse_version_from_output(output: &str) -> Option<String> {
-    let first_line = output.lines().next()?;
-
-    // Check for nightly format first
-    if first_line.contains("Nightly Release") {
-        return first_line
-            .split("Nightly Release")
-            .nth(1)?
-            .split_whitespace()
-            .next()
-            .map(String::from);
-    }
-
-    // Standard version format: find 'v' and extract after it
-    if let Some(v_pos) = first_line.find('v') {
-        let version = first_line[v_pos + 1..]
-            .split_whitespace()
-            .next()?
-            .to_string();
-
-        // Validate it looks like a version (has dots and numbers)
-        if version.contains('.') && version.chars().any(|c| c.is_numeric()) {
-            return Some(version);
-        }
-    }
-
-    None
-}
+use sysinfo::{ProcessRefreshKind, System};
 
 /// A thin wrapper around the `service_manager::ServiceManager`, which makes our own testing
 /// easier.
@@ -74,24 +24,14 @@ fn parse_version_from_output(output: &str) -> Option<String> {
 /// need assert that the service manager is used. Testing code that used the real service manager
 /// would result in real services on the machines we are testing on; that can leave a bit of a mess
 /// to clean up, especially if the tests fail.
-pub trait ServiceControl: Sync {
+pub trait ServiceControl: Sync + Send {
     fn create_service_user(&self, username: &str) -> Result<()>;
     fn get_available_port(&self) -> Result<u16>;
     fn install(&self, install_ctx: ServiceInstallCtx, user_mode: bool) -> Result<()>;
     fn get_process_pid(&self, path: &Path) -> Result<u32>;
-    /// Get the version of a running process by its PID.
-    ///
-    /// Attempts to extract version by executing `--version` on the process's binary.
-    /// This works even when the binary has been replaced on disk during upgrades,
-    /// by using cross-platform process information from sysinfo.
-    ///
-    /// Returns `None` if version cannot be determined (not an error condition).
-    /// Errors only on system-level failures.
-    fn get_process_version(&self, pid: u32) -> Result<Option<String>>;
     fn start(&self, service_name: &str, user_mode: bool) -> Result<()>;
     fn stop(&self, service_name: &str, user_mode: bool) -> Result<()>;
     fn uninstall(&self, service_name: &str, user_mode: bool) -> Result<()>;
-    fn verify_process_by_pid(&self, pid: u32, expected_name: &str) -> Result<bool>;
     fn wait(&self, delay: u64);
 }
 
@@ -106,7 +46,9 @@ impl ServiceControl for ServiceController {
             .arg("-u")
             .arg(username)
             .output()
-            .inspect_err(|err| error!("Failed to execute id -u: {err:?}"))?;
+            .map_err(|err| Error::ExecutionFailed {
+                reason: format!("Failed to execute id -u: {err:?}"),
+            })?;
         if output.status.success() {
             println!("The {username} user already exists");
             return Ok(());
@@ -115,13 +57,23 @@ impl ServiceControl for ServiceController {
         let useradd_exists = Command::new("which")
             .arg("useradd")
             .output()
-            .inspect_err(|err| error!("Failed to execute which useradd: {err:?}"))?
+            .map_err(|err| {
+                error!("Failed to execute which useradd: {err:?}");
+                Error::ExecutionFailed {
+                    reason: format!("Failed to execute which useradd: {err:?}"),
+                }
+            })?
             .status
             .success();
         let adduser_exists = Command::new("which")
             .arg("adduser")
             .output()
-            .inspect_err(|err| error!("Failed to execute which adduser: {err:?}"))?
+            .map_err(|err| {
+                error!("Failed to execute which adduser: {err:?}");
+                Error::ExecutionFailed {
+                    reason: format!("Failed to execute which adduser: {err:?}"),
+                }
+            })?
             .status
             .success();
 
@@ -132,7 +84,12 @@ impl ServiceControl for ServiceController {
                 .arg("/bin/bash")
                 .arg(username)
                 .output()
-                .inspect_err(|err| error!("Failed to execute useradd: {err:?}"))?
+                .map_err(|err| {
+                    error!("Failed to execute useradd: {err:?}");
+                    Error::ExecutionFailed {
+                        reason: format!("Failed to execute useradd: {err:?}"),
+                    }
+                })?
         } else if adduser_exists {
             Command::new("adduser")
                 .arg("-s")
@@ -140,7 +97,12 @@ impl ServiceControl for ServiceController {
                 .arg("-D")
                 .arg(username)
                 .output()
-                .inspect_err(|err| error!("Failed to execute adduser: {err:?}"))?
+                .map_err(|err| {
+                    error!("Failed to execute adduser: {err:?}");
+                    Error::ExecutionFailed {
+                        reason: format!("Failed to execute adduser: {err:?}"),
+                    }
+                })?
         } else {
             error!("Neither useradd nor adduser is available. ServiceUserAccountCreationFailed");
             return Err(Error::ServiceUserAccountCreationFailed);
@@ -157,6 +119,7 @@ impl ServiceControl for ServiceController {
 
     #[cfg(target_os = "macos")]
     fn create_service_user(&self, username: &str) -> Result<()> {
+        use crate::error::Error;
         use std::process::Command;
         use std::str;
 
@@ -165,9 +128,12 @@ impl ServiceControl for ServiceController {
             .arg("-list")
             .arg("/Users")
             .output()
-            .inspect_err(|err| error!("Failed to execute dscl: {err:?}"))?;
-        let output_str = str::from_utf8(&output.stdout)
-            .inspect_err(|err| error!("Error while converting output to utf8: {err:?}"))?;
+            .map_err(|err| Error::ExecutionFailed {
+                reason: format!("Failed to execute dscl: {err:?}"),
+            })?;
+        let output_str = str::from_utf8(&output.stdout).map_err(|err| Error::StringConversion {
+            reason: format!("Error while converting output to utf8: {err:?}"),
+        })?;
         if output_str.lines().any(|line| line == username) {
             return Ok(());
         }
@@ -178,9 +144,12 @@ impl ServiceControl for ServiceController {
             .arg("/Users")
             .arg("UniqueID")
             .output()
-            .inspect_err(|err| error!("Failed to execute dscl: {err:?}"))?;
-        let output_str = str::from_utf8(&output.stdout)
-            .inspect_err(|err| error!("Error while converting output to utf8: {err:?}"))?;
+            .map_err(|err| Error::ExecutionFailed {
+                reason: format!("Failed to execute dscl: {err:?}"),
+            })?;
+        let output_str = str::from_utf8(&output.stdout).map_err(|err| Error::StringConversion {
+            reason: format!("Error while converting output to utf8: {err:?}"),
+        })?;
         let mut max_id = 0;
 
         for line in output_str.lines() {
@@ -212,7 +181,9 @@ impl ServiceControl for ServiceController {
                 .arg("-c")
                 .arg(&cmd)
                 .status()
-                .inspect_err(|err| error!("Error while executing dscl command: {err:?}"))?;
+                .map_err(|err| Error::ExecutionFailed {
+                    reason: format!("Error while executing dscl command: {err:?}"),
+                })?;
             if !status.success() {
                 error!("The command {cmd} failed to execute. ServiceUserAccountCreationFailed");
                 return Err(Error::ServiceUserAccountCreationFailed);
@@ -227,10 +198,19 @@ impl ServiceControl for ServiceController {
     }
 
     fn get_available_port(&self) -> Result<u16> {
-        let addr: SocketAddr = "127.0.0.1:0".parse()?;
+        let addr: SocketAddr = "127.0.0.1:0".parse().map_err(|err| Error::AddrParseError {
+            reason: format!("Failed to parse address '127.0.0.1:0': {err}"),
+        })?;
 
-        let socket = TcpListener::bind(addr)?;
-        let port = socket.local_addr()?.port();
+        let socket = TcpListener::bind(addr).map_err(|err| Error::FileOperationFailed {
+            reason: format!("Failed to bind to {addr}: {err}"),
+        })?;
+        let port = socket
+            .local_addr()
+            .map_err(|err| Error::FileOperationFailed {
+                reason: format!("Failed to get local address: {err}"),
+            })?
+            .port();
         drop(socket);
         trace!("Got available port: {port}");
 
@@ -242,34 +222,28 @@ impl ServiceControl for ServiceController {
             "Searching for process with binary at {}",
             bin_path.to_string_lossy()
         );
-        let system = System::new_all();
-        let bin_path_str = bin_path.to_string_lossy();
-        let normalized_bin_path = normalize_path_for_comparison(&bin_path_str);
-
+        let process_refresh_kind = ProcessRefreshKind::everything()
+            .without_disk_usage()
+            .without_memory();
+        let mut system = System::new();
+        system.refresh_processes_specifics(process_refresh_kind);
         for (pid, process) in system.processes() {
-            if let Some(path) = process.exe() {
-                // Direct match (existing logic)
-                if bin_path == path {
-                    trace!("Found process {bin_path:?} with PID: {pid} (exact match)");
-                    return Ok(pid.to_string().parse::<u32>()?);
-                }
-
-                // Enhanced matching: handle upgrade-related path patterns
-                let path_str = path.to_string_lossy();
-                let normalized_path = normalize_path_for_comparison(&path_str);
-
-                if normalized_path == normalized_bin_path {
-                    debug!(
-                        "Found process with modified path: '{}' matches expected '{}' (normalized)",
-                        path_str, bin_path_str
-                    );
-                    trace!("Found process {bin_path:?} with PID: {pid}");
-                    return Ok(pid.to_string().parse::<u32>()?);
-                }
+            if let Some(path) = process.exe()
+                && bin_path == path
+            {
+                // There does not seem to be any easy way to get the process ID from the `Pid`
+                // type. Probably something to do with representing it in a cross-platform way.
+                trace!("Found process {bin_path:?} with PID: {pid}");
+                return pid
+                    .to_string()
+                    .parse::<u32>()
+                    .map_err(|err| Error::NumberParsingFailed {
+                        reason: format!("Failed to parse PID {pid}: {err}"),
+                    });
             }
         }
-        error!(
-            "No process was located with a path at {}",
+        warn!(
+            "No process found at {}, the service might not be running",
             bin_path.to_string_lossy()
         );
         Err(Error::ServiceProcessNotFound(
@@ -277,162 +251,101 @@ impl ServiceControl for ServiceController {
         ))
     }
 
-    fn verify_process_by_pid(&self, pid: u32, expected_name: &str) -> Result<bool> {
-        debug!("Verifying process with PID {pid}, expected name: {expected_name}");
-
-        let mut system = System::new();
-        let pid = Pid::from_u32(pid);
-
-        if !system.refresh_process_specifics(
-            pid,
-            ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet),
-        ) {
-            debug!("Process with PID {pid} does not exist");
-            return Ok(false);
-        }
-
-        if let Some(process) = system.process(pid)
-            && let Some(exe_path) = process.exe()
-        {
-            let process_name = exe_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            // Handle " (deleted)" suffix that appears during binary replacement
-            let normalized_name = normalize_path_for_comparison(process_name);
-            let is_match =
-                normalized_name == expected_name || normalized_name.starts_with(expected_name);
-
-            debug!(
-                "Process {pid} name: '{}' (normalized: '{}'), expected: '{}', match: {}",
-                process_name, normalized_name, expected_name, is_match
-            );
-            return Ok(is_match);
-        }
-
-        Ok(false)
-    }
-
-    fn get_process_version(&self, pid: u32) -> Result<Option<String>> {
-        use std::io::Read;
-        use std::process::{Command, Stdio};
-
-        debug!("Extracting version from process with PID {pid}");
-
-        let system = System::new_all();
-        if let Some(process) = system.process(Pid::from_u32(pid))
-            && let Some(exe_path) = process.exe()
-        {
-            debug!("Found exe path for PID {pid}: {}", exe_path.display());
-
-            match Command::new(exe_path)
-                .arg("--version")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(mut child) => {
-                    let mut output = String::new();
-                    if let Some(ref mut stdout) = child.stdout {
-                        let _ = stdout.read_to_string(&mut output);
-                    }
-
-                    // Wait with timeout (2 seconds)
-                    let timeout = std::time::Duration::from_secs(2);
-                    let start = std::time::Instant::now();
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(status)) if status.success() => {
-                                if let Some(version) = parse_version_from_output(&output) {
-                                    debug!(
-                                        "Successfully extracted version '{version}' from PID {pid}"
-                                    );
-                                    return Ok(Some(version));
-                                }
-                                break;
-                            }
-                            Ok(Some(_)) => break, // Non-zero exit
-                            Ok(None) => {
-                                if start.elapsed() > timeout {
-                                    debug!("Version extraction timed out for PID {pid}");
-                                    let _ = child.kill();
-                                    break;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(50));
-                            }
-                            Err(e) => {
-                                debug!("Error waiting for version command: {e:?}");
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    debug!("Failed to spawn --version command: {e:?}");
-                }
-            }
-        }
-
-        debug!("Could not extract version from process {pid}");
-        Ok(None)
-    }
-
     fn install(&self, install_ctx: ServiceInstallCtx, user_mode: bool) -> Result<()> {
         debug!("Installing service: {install_ctx:?}");
-        let mut manager = <dyn ServiceManager>::native()
-            .inspect_err(|err| error!("Could not get native ServiceManage: {err:?}"))?;
+        let mut manager =
+            <dyn ServiceManager>::native().map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Could not get native ServiceManage: {err:?}"),
+            })?;
         if user_mode {
-            manager
-                .set_level(ServiceLevel::User)
-                .inspect_err(|err| error!("Could not set service to user mode: {err:?}"))?;
+            manager.set_level(ServiceLevel::User).map_err(|err| {
+                Error::ServiceManagementFailed {
+                    reason: format!("Could not set service to user mode: {err:?}"),
+                }
+            })?;
         }
         manager
             .install(install_ctx)
-            .inspect_err(|err| error!("Error while installing service: {err:?}"))?;
+            .map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Error while installing service: {err:?}"),
+            })?;
         Ok(())
     }
 
     fn start(&self, service_name: &str, user_mode: bool) -> Result<()> {
         debug!("Starting service: {service_name}");
-        let label: ServiceLabel = service_name.parse()?;
-        let mut manager = <dyn ServiceManager>::native()
-            .inspect_err(|err| error!("Could not get native ServiceManage: {err:?}"))?;
+        let label: ServiceLabel =
+            service_name
+                .parse()
+                .map_err(|err| Error::ServiceLabelParsingFailed {
+                    reason: format!("Failed to parse service name '{service_name}': {err}"),
+                })?;
+        let mut manager =
+            <dyn ServiceManager>::native().map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Could not get native ServiceManage: {err:?}"),
+            })?;
         if user_mode {
-            manager
-                .set_level(ServiceLevel::User)
-                .inspect_err(|err| error!("Could not set service to user mode: {err:?}"))?;
+            manager.set_level(ServiceLevel::User).map_err(|err| {
+                Error::ServiceManagementFailed {
+                    reason: format!("Could not set service to user mode: {err:?}"),
+                }
+            })?;
         }
         manager
             .start(ServiceStartCtx { label })
-            .inspect_err(|err| error!("Error while starting service: {err:?}"))?;
+            .map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Error while starting service: {err:?}"),
+            })?;
         Ok(())
     }
 
     fn stop(&self, service_name: &str, user_mode: bool) -> Result<()> {
         debug!("Stopping service: {service_name}");
-        let label: ServiceLabel = service_name.parse()?;
-        let mut manager = <dyn ServiceManager>::native()
-            .inspect_err(|err| error!("Could not get native ServiceManage: {err:?}"))?;
+        let label: ServiceLabel =
+            service_name
+                .parse()
+                .map_err(|err| Error::ServiceLabelParsingFailed {
+                    reason: format!("Failed to parse service name '{service_name}': {err}"),
+                })?;
+        let mut manager =
+            <dyn ServiceManager>::native().map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Could not get native ServiceManage: {err:?}"),
+            })?;
         if user_mode {
-            manager
-                .set_level(ServiceLevel::User)
-                .inspect_err(|err| error!("Could not set service to user mode: {err:?}"))?;
+            manager.set_level(ServiceLevel::User).map_err(|err| {
+                Error::ServiceManagementFailed {
+                    reason: format!("Could not set service to user mode: {err:?}"),
+                }
+            })?;
         }
         manager
             .stop(ServiceStopCtx { label })
-            .inspect_err(|err| error!("Error while stopping service: {err:?}"))?;
+            .map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Error while stopping service: {err:?}"),
+            })?;
 
         Ok(())
     }
 
     fn uninstall(&self, service_name: &str, user_mode: bool) -> Result<()> {
         debug!("Uninstalling service: {service_name}");
-        let label: ServiceLabel = service_name.parse()?;
-        let mut manager = <dyn ServiceManager>::native()
-            .inspect_err(|err| error!("Could not get native ServiceManage: {err:?}"))?;
+        let label: ServiceLabel =
+            service_name
+                .parse()
+                .map_err(|err| Error::ServiceLabelParsingFailed {
+                    reason: format!("Failed to parse service name '{service_name}': {err}"),
+                })?;
+        let mut manager =
+            <dyn ServiceManager>::native().map_err(|err| Error::ServiceManagementFailed {
+                reason: format!("Could not get native ServiceManage: {err:?}"),
+            })?;
 
         if user_mode {
-            manager
-                .set_level(ServiceLevel::User)
-                .inspect_err(|err| error!("Could not set service to user mode: {err:?}"))?;
+            manager.set_level(ServiceLevel::User).map_err(|err| {
+                Error::ServiceManagementFailed {
+                    reason: format!("Could not set service to user mode: {err:?}"),
+                }
+            })?;
         }
         match manager.uninstall(ServiceUninstallCtx { label }) {
             Ok(()) => Ok(()),
@@ -455,7 +368,9 @@ impl ServiceControl for ServiceController {
                     Err(Error::ServiceDoesNotExists(service_name.to_string()))
                 } else {
                     error!("Error while uninstalling service: {err:?}");
-                    Err(err.into())
+                    Err(Error::ServiceManagementFailed {
+                        reason: format!("Error while uninstalling service: {err:?}"),
+                    })
                 }
             }
         }
@@ -467,50 +382,5 @@ impl ServiceControl for ServiceController {
     fn wait(&self, delay: u64) {
         trace!("Waiting for {delay} milliseconds");
         std::thread::sleep(std::time::Duration::from_millis(delay));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_version_standard() {
-        let output = "Autonomi Node v0.4.9\nNetwork version: ant/1.0/1\nPackage version: 2025.11.2.1\nGit info: feat-restart_on_success / 892e58a79 / 2025-12-03";
-        assert_eq!(parse_version_from_output(output), Some("0.4.9".to_string()));
-    }
-
-    #[test]
-    fn test_parse_version_prerelease() {
-        let output = "Autonomi Node v0.4.10-rc.1\nNetwork version: ant/1.0/1";
-        assert_eq!(
-            parse_version_from_output(output),
-            Some("0.4.10-rc.1".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_version_nightly() {
-        let output = "Autonomi Node -- Nightly Release 2024.12.03\nNetwork version: ant/1.0/1";
-        assert_eq!(
-            parse_version_from_output(output),
-            Some("2024.12.03".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_version_invalid() {
-        assert_eq!(parse_version_from_output("Invalid output"), None);
-    }
-
-    #[test]
-    fn test_parse_version_empty() {
-        assert_eq!(parse_version_from_output(""), None);
-    }
-
-    #[test]
-    fn test_parse_version_no_version_prefix() {
-        let output = "Autonomi Node 0.4.9";
-        assert_eq!(parse_version_from_output(output), None);
     }
 }
