@@ -13,10 +13,6 @@ version = "0.14.1"
 name = "antctl"
 path = "src/bin/cli/main.rs"
 
-[[bin]]
-name = "antctld"
-path = "src/bin/daemon/main.rs"
-
 [features]
 chaos = []
 default = ["quic"]
@@ -57,6 +53,7 @@ sysinfo = "0.30.12"
 thiserror = "1.0.23"
 tokio = { version = "1.43", features = ["full"] }
 tracing = { version = "~0.1.26" }
+prometheus-parse = "0.2.5"
 tonic = { version = "0.6.2" }
 uuid = { version = "1.5.0", features = ["v4"] }
 which = "6.0.1"

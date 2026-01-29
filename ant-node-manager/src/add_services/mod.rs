@@ -9,23 +9,19 @@ pub mod config;
 #[cfg(test)]
 mod tests;
 
-use self::config::{AddDaemonServiceOptions, AddNodeServiceOptions, InstallNodeServiceCtxBuilder};
+use self::config::{AddNodeServiceOptions, InstallNodeServiceCtxBuilder};
 use crate::{
-    DAEMON_SERVICE_NAME, VerbosityLevel,
+    VerbosityLevel,
     config::{create_owned_dir, get_user_antnode_data_dir},
+    error::{AddNodeError, Error, Result},
     helpers::{check_port_availability, get_start_port_if_applicable, increment_port_option},
 };
 use ant_service_management::{
-    DaemonServiceData, NodeRegistryManager, NodeServiceData, ServiceStatus,
+    NodeRegistryManager, NodeServiceData, ReachabilityProgress, ServiceStatus,
     control::ServiceControl, node::NODE_SERVICE_DATA_SCHEMA_LATEST,
 };
-use color_eyre::{Help, Result, eyre::eyre};
 use colored::Colorize;
-use service_manager::ServiceInstallCtx;
-use std::{
-    ffi::OsString,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-};
+use std::net::{IpAddr, SocketAddr};
 
 /// Install antnode as a service.
 ///
@@ -35,6 +31,7 @@ use std::{
 /// but they enable more controlled unit testing.
 ///
 /// Returns the service names of the added services.
+#[tracing::instrument(skip(options, node_registry, service_control), err)]
 pub async fn add_node(
     options: AddNodeServiceOptions,
     node_registry: NodeRegistryManager,
@@ -46,7 +43,7 @@ pub async fn add_node(
             && count > 1
         {
             error!("A genesis node can only be added as a single node");
-            return Err(eyre!("A genesis node can only be added as a single node"));
+            return Err(AddNodeError::MultipleGenesisNodesNotAllowed.into());
         }
 
         let mut genesis_node_exists = false;
@@ -59,7 +56,7 @@ pub async fn add_node(
 
         if genesis_node_exists {
             error!("A genesis node already exists");
-            return Err(eyre!("A genesis node already exists"));
+            return Err(AddNodeError::GenesisNodeAlreadyExists.into());
         }
     }
 
@@ -83,7 +80,7 @@ pub async fn add_node(
         .file_name()
         .ok_or_else(|| {
             error!("Could not get filename from the antnode download path");
-            eyre!("Could not get filename from the antnode download path")
+            AddNodeError::FileNameExtractionFailed
         })?
         .to_string_lossy()
         .to_string();
@@ -106,30 +103,25 @@ pub async fn add_node(
 
     while node_number <= target_node_count {
         trace!("Adding node with node_number {node_number}");
-        let rpc_free_port = if let Some(port) = rpc_port {
+
+        let metrics_free_port = if let Some(port) = metrics_port {
             port
         } else {
             service_control.get_available_port()?
         };
 
-        let metrics_free_port = if let Some(port) = metrics_port {
-            Some(port)
-        } else if options.enable_metrics_server {
-            Some(service_control.get_available_port()?)
+        let rpc_socket_addr = if options.rpc_address.is_some() || rpc_port.is_some() {
+            let rpc_free_port = if let Some(port) = rpc_port {
+                port
+            } else {
+                service_control.get_available_port()?
+            };
+            let rpc_addr = options
+                .rpc_address
+                .unwrap_or(std::net::Ipv4Addr::new(127, 0, 0, 1));
+            Some(SocketAddr::new(IpAddr::V4(rpc_addr), rpc_free_port))
         } else {
             None
-        };
-
-        let node_free_port = if let Some(port) = node_port {
-            Some(port)
-        } else {
-            Some(service_control.get_available_port()?)
-        };
-
-        let rpc_socket_addr = if let Some(addr) = options.rpc_address {
-            SocketAddr::new(IpAddr::V4(addr), rpc_free_port)
-        } else {
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), rpc_free_port)
         };
 
         let service_name = format!("antnode{node_number}");
@@ -157,15 +149,28 @@ pub async fn add_node(
             create_owned_dir(service_log_dir_path.clone(), user)?;
         } else {
             debug!("Creating data_dir and log_dirs without user");
-            std::fs::create_dir_all(service_data_dir_path.clone())?;
-            std::fs::create_dir_all(service_log_dir_path.clone())?;
+            std::fs::create_dir_all(&service_data_dir_path).map_err(|err| {
+                Error::DirectoryCreationFailed {
+                    path: service_data_dir_path.clone(),
+                    reason: err.to_string(),
+                }
+            })?;
+            std::fs::create_dir_all(&service_log_dir_path).map_err(|err| {
+                Error::DirectoryCreationFailed {
+                    path: service_log_dir_path.clone(),
+                    reason: err.to_string(),
+                }
+            })?;
         }
 
         debug!("Copying antnode binary to {service_antnode_path:?}");
-        std::fs::copy(
-            options.antnode_src_path.clone(),
-            service_antnode_path.clone(),
-        )?;
+        std::fs::copy(&options.antnode_src_path, &service_antnode_path).map_err(|err| {
+            Error::FileCopyFailed {
+                src: options.antnode_src_path.clone(),
+                dst: service_antnode_path.clone(),
+                reason: err.to_string(),
+            }
+        })?;
 
         let install_ctx = InstallNodeServiceCtxBuilder {
             alpha: options.alpha,
@@ -184,8 +189,9 @@ pub async fn add_node(
             network_id: options.network_id,
             no_upnp: options.no_upnp,
             node_ip: options.node_ip,
-            node_port: node_free_port,
+            node_port,
             restart_policy: options.restart_policy,
+            skip_reachability_check: options.skip_reachability_check,
             rewards_address: options.rewards_address,
             rpc_socket_addr,
             service_user: options.user.clone(),
@@ -202,7 +208,7 @@ pub async fn add_node(
                     service_antnode_path.to_string_lossy().into_owned(),
                     service_data_dir_path.to_string_lossy().into_owned(),
                     service_log_dir_path.to_string_lossy().into_owned(),
-                    rpc_socket_addr,
+                    metrics_free_port,
                 ));
 
                 node_registry
@@ -210,10 +216,9 @@ pub async fn add_node(
                         alpha: options.alpha,
                         antnode_path: service_antnode_path,
                         auto_restart: options.auto_restart,
-                        connected_peers: None,
+                        connected_peers: 0,
                         data_dir_path: service_data_dir_path.clone(),
                         evm_network: options.evm_network.clone(),
-                        relay: false,
                         initial_peers_config: options.init_peers_config.clone(),
                         listen_addr: None,
                         log_dir_path: service_log_dir_path.clone(),
@@ -223,15 +228,17 @@ pub async fn add_node(
                         metrics_port: metrics_free_port,
                         network_id: options.network_id,
                         node_ip: options.node_ip,
-                        node_port: node_free_port,
+                        node_port,
                         number: node_number,
+                        reachability_progress: ReachabilityProgress::NotRun,
+                        last_critical_failure: None,
                         rewards_address: options.rewards_address,
-                        reward_balance: None,
                         rpc_socket_addr,
                         peer_id: None,
                         pid: None,
                         schema_version: NODE_SERVICE_DATA_SCHEMA_LATEST,
                         service_name,
+                        skip_reachability_check: options.skip_reachability_check,
                         status: ServiceStatus::Added,
                         no_upnp: options.no_upnp,
                         user: options.user.clone(),
@@ -242,7 +249,13 @@ pub async fn add_node(
                     .await;
                 // We save the node registry for each service because it's possible any number of
                 // services could fail to be added.
-                node_registry.save().await?;
+                node_registry
+                    .save()
+                    .await
+                    .map_err(|err| Error::RegistryOperationFailed {
+                        operation: "save node registry after adding service".to_string(),
+                        reason: err.to_string(),
+                    })?;
             }
             Err(e) => {
                 error!("Failed to add service {service_name}: {e}");
@@ -258,7 +271,12 @@ pub async fn add_node(
 
     if options.delete_antnode_src {
         debug!("Deleting antnode binary file");
-        std::fs::remove_file(options.antnode_src_path)?;
+        std::fs::remove_file(&options.antnode_src_path).map_err(|err| {
+            Error::FileRemovalFailed {
+                path: options.antnode_src_path.clone(),
+                reason: err.to_string(),
+            }
+        })?;
     }
 
     if !added_service_data.is_empty() {
@@ -274,7 +292,7 @@ pub async fn add_node(
             println!("    - Antnode path: {}", install.1);
             println!("    - Data path: {}", install.2);
             println!("    - Log path: {}", install.3);
-            println!("    - RPC port: {}", install.4);
+            println!("    - Metrics port: {}", install.4);
         }
         println!("[!] Note: newly added services have not been started");
     }
@@ -286,8 +304,7 @@ pub async fn add_node(
                 println!("{} {}: {}", "✕".red(), failed.0, failed.1);
             }
         }
-        return Err(eyre!("Failed to add one or more services")
-            .suggestion("However, any services that were successfully added will be usable."));
+        return Err(AddNodeError::ServiceAdditionFailed.into());
     }
 
     let added_services_names = added_service_data
@@ -296,70 +313,4 @@ pub async fn add_node(
         .collect();
 
     Ok(added_services_names)
-}
-
-/// Install the daemon as a service.
-///
-/// This only defines the service; it does not start it.
-pub async fn add_daemon(
-    options: AddDaemonServiceOptions,
-    node_registry: NodeRegistryManager,
-    service_control: &dyn ServiceControl,
-) -> Result<()> {
-    if node_registry.daemon.read().await.is_some() {
-        error!("A antctld service has already been created");
-        return Err(eyre!("A antctld service has already been created"));
-    }
-
-    debug!(
-        "Copying daemon binary file to {:?}",
-        options.daemon_install_bin_path
-    );
-    std::fs::copy(
-        options.daemon_src_bin_path.clone(),
-        options.daemon_install_bin_path.clone(),
-    )?;
-
-    let install_ctx = ServiceInstallCtx {
-        args: vec![
-            OsString::from("--port"),
-            OsString::from(options.port.to_string()),
-            OsString::from("--address"),
-            OsString::from(options.address.to_string()),
-        ],
-        autostart: true,
-        contents: None,
-        environment: options.env_variables,
-        label: DAEMON_SERVICE_NAME.parse()?,
-        program: options.daemon_install_bin_path.clone(),
-        restart_policy: service_manager::RestartPolicy::OnSuccess { delay_secs: None },
-        username: Some(options.user),
-        working_directory: None,
-    };
-
-    match service_control.install(install_ctx, false) {
-        Ok(()) => {
-            let daemon = DaemonServiceData {
-                daemon_path: options.daemon_install_bin_path.clone(),
-                endpoint: Some(SocketAddr::new(IpAddr::V4(options.address), options.port)),
-                pid: None,
-                service_name: DAEMON_SERVICE_NAME.to_string(),
-                status: ServiceStatus::Added,
-                version: options.version,
-            };
-
-            node_registry.insert_daemon(daemon).await;
-            info!("Daemon service has been added successfully");
-            println!("Daemon service added {}", "✓".green());
-            println!("[!] Note: the service has not been started");
-            node_registry.save().await?;
-            std::fs::remove_file(options.daemon_src_bin_path)?;
-            Ok(())
-        }
-        Err(e) => {
-            error!("Failed to add daemon service: {e}");
-            println!("Failed to add daemon service: {e}");
-            Err(e.into())
-        }
-    }
 }
