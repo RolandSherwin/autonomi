@@ -48,6 +48,7 @@ mock! {
         fn start(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<()>;
         fn stop(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<()>;
         fn uninstall(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<()>;
+        fn service_definition_has_metrics_port(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<bool>;
         fn wait(&self, delay: u64);
     }
 }

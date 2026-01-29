@@ -127,6 +127,7 @@ pub trait ServiceStateActions {
     async fn data_dir_path(&self) -> PathBuf;
     async fn is_user_mode(&self) -> bool;
     async fn log_dir_path(&self) -> PathBuf;
+    async fn metrics_port(&self) -> u16;
     async fn name(&self) -> String;
     async fn pid(&self) -> Option<u32>;
     async fn on_remove(&self);

@@ -110,6 +110,12 @@ fn setup_upgrade_mock_expectations(
             .times(1)
             .returning(|_, _| Ok(()));
 
+        mock_service_control
+            .expect_service_definition_has_metrics_port()
+            .with(eq(service_name.clone()), eq(false))
+            .times(1)
+            .returning(|_, _| Ok(true));
+
         // Mock the reinstall process (may not be called if upgrade is just binary copy)
         // No uninstall/install calls expected for config retention tests
 
