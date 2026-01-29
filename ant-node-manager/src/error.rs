@@ -141,6 +141,8 @@ pub enum Error {
     ServiceStatusMismatch {
         expected: ant_service_management::ServiceStatus,
     },
+    #[error("Some services are missing metrics configuration: {services:?}. Run `antctl upgrade`.")]
+    MissingMetricsConfiguration { services: Vec<String> },
     #[error("Failed to determine user antnode data directory")]
     UserDataDirNotFound,
     #[error("User '{user}' does not exist on the system")]

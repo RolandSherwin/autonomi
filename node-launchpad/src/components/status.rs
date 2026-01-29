@@ -44,6 +44,7 @@ use crossterm::event::KeyEvent;
 use ratatui::text::Span;
 use ratatui::{prelude::*, widgets::*};
 use std::fmt;
+use std::sync::Arc;
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -159,9 +160,10 @@ impl Status<'_> {
 
         ant_node_manager::refresh_node_registry(
             node_registry.clone(),
-            &ServiceController {},
+            Arc::new(ServiceController {}),
             false,
             true,
+            false,
             ant_node_manager::VerbosityLevel::Minimal,
         )
         .await?;
@@ -366,9 +368,10 @@ impl Status<'_> {
 
                 if let Err(err) = ant_node_manager::refresh_node_registry(
                     node_registry.clone(),
-                    &ServiceController {},
+                    Arc::new(ServiceController {}),
                     false, // full_refresh
                     true,  // is_local_network
+                    false, // check_missing_metrics
                     ant_node_manager::VerbosityLevel::Minimal,
                 )
                 .await
