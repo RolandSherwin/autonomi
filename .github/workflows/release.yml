@@ -33,11 +33,6 @@ on:
         type: boolean
         required: false
         default: false
-      release-antnode-rpc-client:
-        description: Release antnode_rpc_client binary
-        type: boolean
-        required: false
-        default: false
       release-evm-testnet:
         description: Release evm-testnet binary
         type: boolean
@@ -89,7 +84,6 @@ jobs:
           export RELEASE_ANTNODE="${{ inputs.release-antnode }}"
           export RELEASE_ANTCTL="${{ inputs.release-antctl }}"
           export RELEASE_ANTCTLD="${{ inputs.release-antctld }}"
-          export RELEASE_ANTNODE_RPC_CLIENT="${{ inputs.release-antnode-rpc-client }}"
           export RELEASE_EVM_TESTNET="${{ inputs.release-evm-testnet }}"
 
           just build-release-artifacts "${{ matrix.target }}"
@@ -163,10 +157,6 @@ jobs:
             download_from_s3 "antctld" "ant-node-manager" "antctl"
           fi
 
-          if [[ "${{ inputs.release-antnode-rpc-client }}" != "true" ]]; then
-            download_from_s3 "antnode_rpc_client" "ant-node-rpc-client" "antnode-rpc-client"
-          fi
-
           if [[ "${{ inputs.release-evm-testnet }}" != "true" ]]; then
             download_from_s3 "evm-testnet" "evm-testnet" "evm-testnet"
           fi
@@ -192,7 +182,6 @@ jobs:
       RELEASE_ANTNODE: ${{ inputs.release-antnode }}
       RELEASE_ANTCTL: ${{ inputs.release-antctl }}
       RELEASE_ANTCTLD: ${{ inputs.release-antctld }}
-      RELEASE_ANTNODE_RPC_CLIENT: ${{ inputs.release-antnode-rpc-client }}
       RELEASE_EVM_TESTNET: ${{ inputs.release-evm-testnet }}
       RELEASE_NAT_DETECTION: ${{ inputs.release-nat-detection }}
       RELEASE_NODE_LAUNCHPAD: ${{ inputs.release-node-launchpad }}
@@ -274,7 +263,6 @@ jobs:
             "antnode.exe" = $env:RELEASE_ANTNODE
             "antctl.exe" = $env:RELEASE_ANTCTL
             "antctld.exe" = $env:RELEASE_ANTCTLD
-            "antnode_rpc_client.exe" = $env:RELEASE_ANTNODE_RPC_CLIENT
             "evm-testnet.exe" = $env:RELEASE_EVM_TESTNET
           }
 
@@ -370,7 +358,6 @@ jobs:
             "antnode.exe" = $env:RELEASE_ANTNODE
             "antctl.exe" = $env:RELEASE_ANTCTL
             "antctld.exe" = $env:RELEASE_ANTCTLD
-            "antnode_rpc_client.exe" = $env:RELEASE_ANTNODE_RPC_CLIENT
             "evm-testnet.exe" = $env:RELEASE_EVM_TESTNET
           }
 
@@ -485,7 +472,6 @@ jobs:
             "antnode:${{ inputs.release-antnode }}"
             "antctl:${{ inputs.release-antctl }}"
             "antctld:${{ inputs.release-antctld }}"
-            "antnode_rpc_client:${{ inputs.release-antnode-rpc-client }}"
             "evm-testnet:${{ inputs.release-evm-testnet }}"
           )
 
@@ -582,7 +568,6 @@ jobs:
             "antnode:${{ inputs.release-antnode }}"
             "antctl:${{ inputs.release-antctl }}"
             "antctld:${{ inputs.release-antctld }}"
-            "antnode_rpc_client:${{ inputs.release-antnode-rpc-client }}"
             "evm-testnet:${{ inputs.release-evm-testnet }}"
           )
 

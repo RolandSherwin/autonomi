@@ -79,10 +79,6 @@ build-release-artifacts arch nightly="false":
     $build_cmd --bin antctld $nightly_feature
   fi
 
-  if [[ "${BUILD_ANTNODE_RPC_CLIENT:-true}" == "true" ]]; then
-    $build_cmd --bin antnode_rpc_client $nightly_feature
-  fi
-
   if [[ "${BUILD_EVM_TESTNET:-true}" == "true" ]]; then
     $build_cmd --bin evm-testnet $nightly_feature
   fi
@@ -123,7 +119,6 @@ package-all-bins:
   just package-bin "antnode"
   just package-bin "antctl"
   just package-bin "antctld"
-  just package-bin "antnode_rpc_client"
   just package-bin "evm-testnet"
 
 package-bin bin version="":
@@ -149,7 +144,6 @@ package-bin bin version="":
     "antnode" \
     "antctl" \
     "antctld" \
-    "antnode_rpc_client" \
     "evm-testnet")
   crate_dir_name=""
 
@@ -172,9 +166,6 @@ package-bin bin version="":
       ;;
     antctld)
       crate_dir_name="ant-node-manager"
-      ;;
-    antnode_rpc_client)
-      crate_dir_name="ant-node-rpc-client"
       ;;
     evm-testnet)
       crate_dir_name="evm-testnet"
@@ -220,7 +211,6 @@ upload-all-packaged-bins-to-s3:
     ant
     antnode
     antctl
-    antnode_rpc_client
     antctld
     evm-testnet
   )
@@ -250,9 +240,6 @@ upload-packaged-bin-to-s3 bin_name:
       ;;
     antctld)
       bucket="antctl"
-      ;;
-    antnode_rpc_client)
-      bucket="antnode-rpc-client"
       ;;
     evm-testnet)
       bucket="evm-testnet"
@@ -303,9 +290,6 @@ delete-s3-bin bin_name version:
       ;;
     antctld)
       bucket="antctl"
-      ;;
-    antnode_rpc_client)
-      bucket="antnode-rpc-client"
       ;;
     evm-testnet)
       bucket="evm-testnet"
@@ -382,7 +366,6 @@ package-arch arch:
     ant
     antnode
     antctl
-    antnode_rpc_client
     antctld
     evm-testnet
   )
@@ -419,7 +402,6 @@ build-artifact-hashes:
     "antnode"
     "antctl"
     "antctld"
-    "antnode_rpc_client"
     "evm-testnet"
   )
 
@@ -485,9 +467,6 @@ build-binary-versions:
         ;;
       antctld)
         crate_dir_name="ant-node-manager"
-        ;;
-      antnode_rpc_client)
-        crate_dir_name="ant-node-rpc-client"
         ;;
       evm-testnet)
         crate_dir_name="evm-testnet"

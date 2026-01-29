@@ -306,7 +306,6 @@ fn get_logging_targets(logging_env_value: &str) -> Result<Vec<(String, Level)>> 
                 ("ant_evm".to_string(), Level::TRACE),
                 ("ant_logging".to_string(), Level::TRACE),
                 ("ant_node_manager".to_string(), Level::TRACE),
-                ("ant_node_rpc_client".to_string(), Level::TRACE),
                 ("ant_protocol".to_string(), Level::TRACE),
                 ("ant_service_management".to_string(), Level::TRACE),
                 ("service-manager".to_string(), Level::DEBUG),
