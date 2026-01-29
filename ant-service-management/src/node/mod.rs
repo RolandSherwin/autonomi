@@ -211,6 +211,10 @@ impl ServiceStateActions for NodeService {
         self.service_data.read().await.log_dir_path.clone()
     }
 
+    async fn metrics_port(&self) -> u16 {
+        self.service_data.read().await.metrics_port
+    }
+
     async fn name(&self) -> String {
         self.service_data.read().await.service_name.clone()
     }

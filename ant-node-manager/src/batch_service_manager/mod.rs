@@ -141,10 +141,12 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
         let mut skip_services = HashSet::new();
         let mut batch_result = BatchResult::default();
         let mut upgrade_summary: HashMap<String, UpgradeResult> = HashMap::new();
+        let mut old_versions: HashMap<String, String> = HashMap::new();
 
         for service in &self.services {
             let service_name = service.name().await;
             info!("Upgrading the {service_name} service");
+            old_versions.insert(service_name.clone(), service.version().await);
 
             match Self::reinstall_service(
                 service,
@@ -199,11 +201,11 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                 continue;
             }
 
-            let old_service_version = service.version().await;
-            // Only set version for services that were actually upgraded
-            service
-                .set_version(&options.target_version.to_string())
-                .await;
+            let old_service_version = match old_versions.get(&service_name) {
+                Some(version) => version.clone(),
+                None => service.version().await,
+            };
+            let new_service_version = service.version().await;
 
             match batch_result.get_errors(&service_name) {
                 Some(err) => {
@@ -214,7 +216,7 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                         service_name.clone(),
                         UpgradeResult::UpgradedButNotStarted(
                             old_service_version.clone(),
-                            options.target_version.to_string(),
+                            new_service_version.clone(),
                             err.to_string(),
                         ),
                     );
@@ -225,7 +227,7 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                             service_name.clone(),
                             UpgradeResult::Forced(
                                 old_service_version.clone(),
-                                options.target_version.to_string(),
+                                new_service_version.clone(),
                             ),
                         );
                     } else {
@@ -233,7 +235,7 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                             service_name.clone(),
                             UpgradeResult::Upgraded(
                                 old_service_version.clone(),
-                                options.target_version.to_string(),
+                                new_service_version.clone(),
                             ),
                         );
                     }
@@ -810,8 +812,8 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
         }
     }
 
-    /// Reinstall the service with the new binary.
-    /// Returns `false` if the service is already at the target version or if the target version is lower than the current version.
+    /// Reinstall the service, optionally copying the new binary.
+    /// Returns `false` if the service is already at the target version (or higher) and no service definition fix is needed.
     #[tracing::instrument(skip(service, service_control, options), err)]
     async fn reinstall_service(
         service: &T,
@@ -828,7 +830,24 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                 context: format!("service '{service_name}' version"),
                 reason: err.to_string(),
             })?;
+
+        let user_mode = service.is_user_mode().await;
+        let needs_metrics_port_fix = service.metrics_port().await == 0;
+        let has_metrics_flag = match service_control
+            .service_definition_has_metrics_port(&service_name, user_mode)
+        {
+            Ok(has_flag) => has_flag,
+            Err(err) => {
+                warn!(
+                    "Failed to read service definition for {service_name}: {err}. Treating as missing metrics flag."
+                );
+                false
+            }
+        };
+        let needs_service_def_fix = needs_metrics_port_fix || !has_metrics_flag;
+
         if !options.force
+            && !needs_service_def_fix
             && (current_version == options.target_version
                 || options.target_version < current_version)
         {
@@ -838,6 +857,9 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
             return Ok(false);
         }
 
+        let skip_binary_copy =
+            !options.force && needs_service_def_fix && options.target_version <= current_version;
+
         info!("Upgrading {service_name} by stopping the service and copying the binary");
         Self::stop(service, service_control, verbosity)
             .await
@@ -845,18 +867,24 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                 error!("Failed to stop service {service_name}: {err}");
             })?;
         let service_bin_path = service.bin_path().await;
-        std::fs::copy(&options.target_bin_path, &service_bin_path).map_err(|err| {
-            let detailed_err = Error::FileCopyFailed {
-                src: options.target_bin_path.clone(),
-                dst: service_bin_path.clone(),
-                reason: err.to_string(),
-            };
-            error!("Failed to copy the binary for service {service_name}: {detailed_err}");
-            detailed_err
-        })?;
+        if skip_binary_copy {
+            info!(
+                "Skipping binary copy for {service_name} because only the service definition needs updating."
+            );
+        } else {
+            std::fs::copy(&options.target_bin_path, &service_bin_path).map_err(|err| {
+                let detailed_err = Error::FileCopyFailed {
+                    src: options.target_bin_path.clone(),
+                    dst: service_bin_path.clone(),
+                    reason: err.to_string(),
+                };
+                error!("Failed to copy the binary for service {service_name}: {detailed_err}");
+                detailed_err
+            })?;
+        }
 
         service_control
-            .uninstall(&service_name, service.is_user_mode().await)
+            .uninstall(&service_name, user_mode)
             .inspect_err(|err| {
                 error!("Failed to uninstall service {service_name}: {err}");
             })?;
@@ -869,11 +897,15 @@ impl<T: ServiceStateActions + Send> BatchServiceManager<T> {
                 .inspect_err(|err| {
                     error!("Failed to build upgrade install context for service {service_name}: {err}");
                 })?,
-            service.is_user_mode().await,
+            user_mode,
         )
         .inspect_err(|err| {
             error!("Failed to install service {service_name}: {err}");
         })?;
+
+        if !skip_binary_copy {
+            service.set_version(&options.target_version.to_string()).await;
+        }
 
         Ok(true)
     }
