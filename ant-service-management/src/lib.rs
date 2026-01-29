@@ -16,6 +16,7 @@ pub mod fs;
 pub mod metric;
 pub mod node;
 pub mod registry;
+mod service_definition;
 
 #[macro_use]
 extern crate tracing;

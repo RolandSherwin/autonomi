@@ -6,14 +6,17 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    service_definition::ServiceDefinitionReader,
+};
 use service_manager::{
-    ServiceInstallCtx, ServiceLabel, ServiceLevel, ServiceManager, ServiceManagerKind,
-    ServiceStartCtx, ServiceStopCtx, ServiceUninstallCtx,
+    ServiceInstallCtx, ServiceLabel, ServiceLevel, ServiceManager, ServiceStartCtx, ServiceStopCtx,
+    ServiceUninstallCtx,
 };
 use std::{
     net::{SocketAddr, TcpListener},
-    path::{Path, PathBuf},
+    path::Path,
 };
 use sysinfo::{ProcessRefreshKind, System};
 
@@ -386,56 +389,8 @@ impl ServiceControl for ServiceController {
         service_name: &str,
         user_mode: bool,
     ) -> Result<bool> {
-        let label: ServiceLabel = service_name.parse().map_err(|err| {
-            Error::ServiceLabelParsingFailed {
-                reason: format!(
-                    "Failed to parse service name '{service_name}' as a service label: {err}"
-                ),
-            }
-        })?;
-
-        let manager_kind = ServiceManagerKind::native().map_err(|err| {
-            Error::ServiceManagementFailed {
-                reason: format!("Failed to determine native service manager: {err}"),
-            }
-        })?;
-
-        match manager_kind {
-            ServiceManagerKind::Launchd => {
-                let dir_path = if user_mode {
-                    launchd_user_dir_path()?
-                } else {
-                    PathBuf::from("/Library/LaunchDaemons")
-                };
-                let path = dir_path.join(format!("{}.plist", label.to_qualified_name()));
-                service_definition_file_has_metrics_port(&path, service_name)
-            }
-            ServiceManagerKind::Systemd => {
-                let dir_path = if user_mode {
-                    systemd_user_dir_path()?
-                } else {
-                    PathBuf::from("/etc/systemd/system")
-                };
-                let path = dir_path.join(format!("{}.service", label.to_script_name()));
-                service_definition_file_has_metrics_port(&path, service_name)
-            }
-            ServiceManagerKind::OpenRc => {
-                let path = PathBuf::from("/etc/init.d").join(label.to_script_name());
-                service_definition_file_has_metrics_port(&path, service_name)
-            }
-            ServiceManagerKind::Rcd => {
-                let path = PathBuf::from("/usr/local/etc/rc.d").join(label.to_script_name());
-                service_definition_file_has_metrics_port(&path, service_name)
-            }
-            ServiceManagerKind::WinSw => {
-                let qualified_name = label.to_qualified_name();
-                let path = PathBuf::from(r"C:\ProgramData\service-manager")
-                    .join(&qualified_name)
-                    .join(format!("{qualified_name}.xml"));
-                service_definition_file_has_metrics_port(&path, service_name)
-            }
-            ServiceManagerKind::Sc => service_definition_sc_has_metrics_port(&label),
-        }
+        let reader = ServiceDefinitionReader::native()?;
+        reader.has_metrics_port_flag(service_name, user_mode)
     }
 
     /// Provide a delay for the service to start or stop.
@@ -444,68 +399,5 @@ impl ServiceControl for ServiceController {
     fn wait(&self, delay: u64) {
         trace!("Waiting for {delay} milliseconds");
         std::thread::sleep(std::time::Duration::from_millis(delay));
-    }
-}
-
-fn systemd_user_dir_path() -> Result<PathBuf> {
-    let config_dir = dirs_next::config_dir().ok_or_else(|| Error::FileOperationFailed {
-        reason: "Unable to locate config directory for systemd user services".to_string(),
-    })?;
-    Ok(config_dir.join("systemd").join("user"))
-}
-
-fn launchd_user_dir_path() -> Result<PathBuf> {
-    let home_dir = dirs_next::home_dir().ok_or_else(|| Error::FileOperationFailed {
-        reason: "Unable to locate home directory for launchd user services".to_string(),
-    })?;
-    Ok(home_dir.join("Library").join("LaunchAgents"))
-}
-
-fn service_definition_file_has_metrics_port(path: &Path, service_name: &str) -> Result<bool> {
-    if !path.exists() {
-        warn!(
-            "Service definition file {path:?} for {service_name} was not found; treating as missing metrics port"
-        );
-        return Ok(false);
-    }
-
-    let contents = std::fs::read(path).map_err(|err| Error::FileOperationFailed {
-        reason: format!("Failed to read service definition file {path:?}: {err}"),
-    })?;
-    Ok(String::from_utf8_lossy(&contents).contains("--metrics-server-port"))
-}
-
-fn service_definition_sc_has_metrics_port(label: &ServiceLabel) -> Result<bool> {
-    let service_name = label.to_qualified_name();
-    #[cfg(windows)]
-    {
-        use std::process::Command;
-
-        let output = Command::new("sc")
-            .arg("qc")
-            .arg(&service_name)
-            .output()
-            .map_err(|err| Error::ExecutionFailed {
-                reason: format!("Failed to execute sc qc for {service_name}: {err:?}"),
-            })?;
-
-        if !output.status.success() {
-            return Err(Error::ServiceManagementFailed {
-                reason: format!(
-                    "Failed to query service {service_name} with sc.exe: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            });
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        return Ok(stdout.contains("--metrics-server-port"));
-    }
-    #[cfg(not(windows))]
-    {
-        warn!(
-            "Service manager kind sc is not supported on this platform; assuming missing metrics port for {service_name}"
-        );
-        Ok(false)
     }
 }

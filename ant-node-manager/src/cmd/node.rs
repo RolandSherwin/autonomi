@@ -198,6 +198,7 @@ pub async fn balance(
         Arc::new(ServiceController {}),
         verbosity != VerbosityLevel::Minimal,
         false,
+        true,
         verbosity,
         false,
     )
@@ -240,6 +241,7 @@ pub async fn remove(
         Arc::new(ServiceController {}),
         verbosity != VerbosityLevel::Minimal,
         false,
+        true,
         verbosity,
         false,
     )
@@ -332,6 +334,7 @@ pub async fn start(
         Arc::new(ServiceController {}),
         verbosity != VerbosityLevel::Minimal,
         false,
+        true,
         verbosity,
         false,
     )
@@ -395,6 +398,7 @@ pub async fn stop(
         Arc::new(ServiceController {}),
         verbosity != VerbosityLevel::Minimal,
         false,
+        true,
         verbosity,
         false,
     )
@@ -457,6 +461,7 @@ pub async fn upgrade(
         node_registry.clone(),
         Arc::new(ServiceController {}),
         verbosity != VerbosityLevel::Minimal,
+        false,
         false,
         verbosity,
         false,

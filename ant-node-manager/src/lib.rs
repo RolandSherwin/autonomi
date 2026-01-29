@@ -70,6 +70,7 @@ pub async fn status_report(
         Arc::clone(&service_control),
         !output_json,
         is_local_network,
+        true,
         VerbosityLevel::Normal,
         save_registry,
     )
@@ -203,6 +204,7 @@ pub async fn refresh_node_registry(
     service_control: Arc<dyn ServiceControl + Send + Sync>,
     full_refresh: bool,
     is_local_network: bool,
+    check_missing_metrics: bool,
     verbosity: VerbosityLevel,
     save_registry: bool,
 ) -> Result<()> {
@@ -238,12 +240,28 @@ pub async fn refresh_node_registry(
     for node in nodes {
         let service_control = Arc::clone(&service_control);
         let pb = pb.clone();
+        let check_missing_metrics = check_missing_metrics;
+        let is_local_network = is_local_network;
         join_set.spawn(async move {
             let result = async {
-                let (service_name, metrics_port) = {
+                let (service_name, metrics_port, user_mode, status) = {
                     let node_guard = node.read().await;
-                    (node_guard.service_name.clone(), node_guard.metrics_port)
+                    (
+                        node_guard.service_name.clone(),
+                        node_guard.metrics_port,
+                        node_guard.user_mode,
+                        node_guard.status,
+                    )
                 };
+
+                if check_missing_metrics
+                    && status != ServiceStatus::Removed
+                    && metrics_port == 0
+                {
+                    return Err(Error::MissingMetricsConfiguration {
+                        services: vec![service_name],
+                    });
+                }
 
                 let metrics_client = MetricsClient::new(metrics_port);
                 let service = NodeService::new(
@@ -273,14 +291,74 @@ pub async fn refresh_node_registry(
                     match service_control.get_process_pid(&service.bin_path().await) {
                         Ok(pid) => {
                             debug!("{service_name} is running with PID {pid}",);
-                            service.on_start(Some(pid), full_refresh).await?;
+                            match service.on_start(Some(pid), full_refresh).await {
+                                Ok(()) => {}
+                                Err(err) => {
+                                    if check_missing_metrics
+                                        && matches!(
+                                            err,
+                                            ant_service_management::Error::MetricsError(_)
+                                        )
+                                    {
+                                        let has_metrics_flag = match service_control
+                                            .service_definition_has_metrics_port(
+                                                &service_name,
+                                                user_mode,
+                                            ) {
+                                            Ok(has_flag) => has_flag,
+                                            Err(err) => {
+                                                warn!(
+                                                    "Failed to read service definition for {service_name}: {err}. Treating as missing metrics flag."
+                                                );
+                                                false
+                                            }
+                                        };
+                                        if !has_metrics_flag {
+                                            return Err(Error::MissingMetricsConfiguration {
+                                                services: vec![service_name],
+                                            });
+                                        }
+                                    }
+                                    return Err(err.into());
+                                }
+                            }
                         }
                         Err(_) => {
                             // try once to check for connectivity, in case the service is running but we
                             // couldn't find it by path
                             if service.metrics_action.check_connectivity().await {
                                 debug!("{service_name} is running (PID not found)",);
-                                service.on_start(None, full_refresh).await?;
+                                match service.on_start(None, full_refresh).await {
+                                    Ok(()) => {}
+                                    Err(err) => {
+                                        if check_missing_metrics
+                                            && matches!(
+                                                err,
+                                                ant_service_management::Error::MetricsError(_)
+                                            )
+                                        {
+                                            let has_metrics_flag = match service_control
+                                                .service_definition_has_metrics_port(
+                                                    &service_name,
+                                                    user_mode,
+                                                ) {
+                                                Ok(has_flag) => has_flag,
+                                                Err(err) => {
+                                                    warn!(
+                                                        "Failed to read service definition for {service_name}: {err}. Treating as missing metrics flag."
+                                                    );
+                                                    false
+                                                }
+                                            };
+                                            if !has_metrics_flag {
+                                                return Err(Error::MissingMetricsConfiguration {
+                                                    services: vec![service_name],
+                                                });
+                                            }
+                                        }
+                                        return Err(err.into());
+                                    }
+                                }
                             } else if service.should_mark_removed().await {
                                 debug!("{service_name} resources missing, marking as removed");
                                 service.on_remove().await;
@@ -317,11 +395,16 @@ pub async fn refresh_node_registry(
     }
 
     let mut task_error = None;
+    let mut missing_metrics_services = Vec::new();
     while let Some(join_result) = join_set.join_next().await {
         match join_result {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
-                task_error.get_or_insert(err);
+                if let Error::MissingMetricsConfiguration { services } = err {
+                    missing_metrics_services.extend(services);
+                } else {
+                    task_error.get_or_insert(err);
+                }
             }
             Err(join_err) => {
                 task_error.get_or_insert_with(|| Error::BatchOperationFailed {
@@ -333,6 +416,14 @@ pub async fn refresh_node_registry(
 
     if let Some(pb) = pb {
         pb.finish_and_clear();
+    }
+
+    if !missing_metrics_services.is_empty() {
+        missing_metrics_services.sort();
+        missing_metrics_services.dedup();
+        return Err(Error::MissingMetricsConfiguration {
+            services: missing_metrics_services,
+        });
     }
 
     if let Some(err) = task_error {
