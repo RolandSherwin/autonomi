@@ -490,12 +490,51 @@ pub async fn upgrade(
         let any_nodes_need_upgraded = node_versions
             .iter()
             .any(|current_version| current_version < &target_version);
-        if !any_nodes_need_upgraded {
+        let mut service_infos = Vec::new();
+        {
+            let nodes = node_registry.nodes.read().await;
+            for node in nodes.iter() {
+                let node = node.read().await;
+                service_infos.push((node.service_name.clone(), node.user_mode, node.metrics_port));
+            }
+        }
+
+        let service_control = ServiceController {};
+        let mut any_nodes_need_service_fix = false;
+        for (service_name, user_mode, metrics_port) in service_infos {
+            let has_metrics_flag = match service_control
+                .service_definition_has_metrics_port(&service_name, user_mode)
+            {
+                Ok(has_flag) => has_flag,
+                Err(err) => {
+                    warn!(
+                        "Failed to read service definition for {service_name}: {err}. Treating as missing metrics flag."
+                    );
+                    false
+                }
+            };
+            if metrics_port == 0 || !has_metrics_flag {
+                any_nodes_need_service_fix = true;
+                break;
+            }
+        }
+
+        if !any_nodes_need_upgraded && !any_nodes_need_service_fix {
             info!("All nodes are at the latest version, no upgrade required.");
             if verbosity != VerbosityLevel::Minimal {
                 println!("{} All nodes are at the latest version", "✓".green());
             }
             return Ok(());
+        }
+
+        if any_nodes_need_service_fix {
+            info!("Some nodes need service definition updates for metrics");
+            if verbosity != VerbosityLevel::Minimal {
+                println!(
+                    "{} Some nodes need service definition updates for metrics",
+                    "i".yellow()
+                );
+            }
         }
     }
     let env_variables = if provided_env_variables.is_some() {

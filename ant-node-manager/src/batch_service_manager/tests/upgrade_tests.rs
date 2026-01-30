@@ -9,7 +9,8 @@
 use super::helpers::*;
 use crate::batch_service_manager::{BatchServiceManager, VerbosityLevel};
 use ant_service_management::{
-    ReachabilityProgress, ServiceStateActions, ServiceStatus, UpgradeOptions, node::NodeService,
+    ReachabilityProgress, ServiceStateActions, ServiceStatus, UpgradeOptions, UpgradeResult,
+    node::NodeService,
 };
 use assert_fs::prelude::*;
 use assert_matches::assert_matches;
@@ -23,6 +24,10 @@ use tokio::sync::RwLock;
 #[tokio::test]
 async fn upgrade_all_should_upgrade_services_to_new_version() -> Result<()> {
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     // Create upgrade options
     let upgrade_options = UpgradeOptions {
@@ -167,8 +172,197 @@ async fn upgrade_all_should_upgrade_services_to_new_version() -> Result<()> {
 }
 
 #[tokio::test]
+async fn upgrade_should_proceed_when_metrics_port_is_zero() -> Result<()> {
+    let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(1)
+        .returning(|_, _| Ok(true));
+    mock_service_control
+        .expect_get_available_port()
+        .times(1)
+        .returning(|| Ok(8123));
+    mock_service_control
+        .expect_uninstall()
+        .times(1)
+        .returning(|_, _| Ok(()));
+    mock_service_control
+        .expect_install()
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let upgrade_options = UpgradeOptions {
+        auto_restart: false,
+        env_variables: None,
+        force: false,
+        start_service: false,
+        target_bin_path: {
+            let tmp_data_dir = assert_fs::TempDir::new()?;
+            let target_node_bin = tmp_data_dir.child("antnode");
+            target_node_bin.write_binary(b"fake antnode binary")?;
+            target_node_bin.to_path_buf()
+        },
+        target_version: Version::new(0, 98, 1),
+    };
+
+    let mut service_data = create_test_service_data(1);
+    service_data.status = ServiceStatus::Added;
+    service_data.metrics_port = 0;
+    let service = NodeService::new(
+        Arc::new(RwLock::new(service_data)),
+        Box::new(MockFileSystemClient::new()),
+        Box::new(MockMetricsClient::new()),
+    );
+
+    let batch_manager = BatchServiceManager::new(
+        vec![service],
+        Box::new(mock_service_control),
+        create_test_registry(),
+        VerbosityLevel::Normal,
+    );
+
+    let (_batch_result, upgrade_summary) = batch_manager
+        .upgrade_all(upgrade_options, 1000, false)
+        .await;
+
+    assert_matches!(
+        upgrade_summary.get("antnode1"),
+        Some(UpgradeResult::Upgraded(_, _))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn upgrade_should_skip_binary_copy_when_only_fixing_metrics() -> Result<()> {
+    let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(1)
+        .returning(|_, _| Ok(false));
+    mock_service_control
+        .expect_get_available_port()
+        .times(1)
+        .returning(|| Ok(8124));
+    mock_service_control
+        .expect_uninstall()
+        .times(1)
+        .returning(|_, _| Ok(()));
+    mock_service_control
+        .expect_install()
+        .times(1)
+        .returning(|_, _| Ok(()));
+
+    let tmp_service_dir = assert_fs::TempDir::new()?;
+    let service_bin = tmp_service_dir.child("antnode");
+    service_bin.write_binary(b"current binary")?;
+
+    let upgrade_options = UpgradeOptions {
+        auto_restart: false,
+        env_variables: None,
+        force: false,
+        start_service: false,
+        target_bin_path: {
+            let tmp_data_dir = assert_fs::TempDir::new()?;
+            let target_node_bin = tmp_data_dir.child("antnode");
+            target_node_bin.write_binary(b"target binary")?;
+            target_node_bin.to_path_buf()
+        },
+        target_version: Version::new(0, 90, 0),
+    };
+
+    let mut service_data = create_test_service_data(1);
+    service_data.status = ServiceStatus::Added;
+    service_data.metrics_port = 0;
+    service_data.antnode_path = service_bin.to_path_buf();
+    service_data.version = "0.99.0".to_string();
+    let service = NodeService::new(
+        Arc::new(RwLock::new(service_data)),
+        Box::new(MockFileSystemClient::new()),
+        Box::new(MockMetricsClient::new()),
+    );
+
+    let batch_manager = BatchServiceManager::new(
+        vec![service],
+        Box::new(mock_service_control),
+        create_test_registry(),
+        VerbosityLevel::Normal,
+    );
+
+    let (_batch_result, upgrade_summary) = batch_manager
+        .upgrade_all(upgrade_options, 1000, false)
+        .await;
+
+    let contents = std::fs::read(service_bin.path())?;
+    assert_eq!(contents, b"current binary");
+    assert_matches!(
+        upgrade_summary.get("antnode1"),
+        Some(UpgradeResult::Upgraded(_, _))
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn upgrade_should_skip_when_version_matches_and_metrics_ok() -> Result<()> {
+    let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(1)
+        .returning(|_, _| Ok(true));
+    mock_service_control.expect_uninstall().times(0);
+    mock_service_control.expect_install().times(0);
+    mock_service_control.expect_get_available_port().times(0);
+
+    let upgrade_options = UpgradeOptions {
+        auto_restart: false,
+        env_variables: None,
+        force: false,
+        start_service: false,
+        target_bin_path: {
+            let tmp_data_dir = assert_fs::TempDir::new()?;
+            let target_node_bin = tmp_data_dir.child("antnode");
+            target_node_bin.write_binary(b"fake antnode binary")?;
+            target_node_bin.to_path_buf()
+        },
+        target_version: Version::new(0, 98, 1),
+    };
+
+    let mut service_data = create_test_service_data(1);
+    service_data.status = ServiceStatus::Added;
+    service_data.metrics_port = 6001;
+    let service = NodeService::new(
+        Arc::new(RwLock::new(service_data)),
+        Box::new(MockFileSystemClient::new()),
+        Box::new(MockMetricsClient::new()),
+    );
+
+    let batch_manager = BatchServiceManager::new(
+        vec![service],
+        Box::new(mock_service_control),
+        create_test_registry(),
+        VerbosityLevel::Normal,
+    );
+
+    let (_batch_result, upgrade_summary) = batch_manager
+        .upgrade_all(upgrade_options, 1000, false)
+        .await;
+
+    assert_matches!(
+        upgrade_summary.get("antnode1"),
+        Some(UpgradeResult::NotRequired)
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn upgrade_all_should_skip_if_target_version_lower() -> Result<()> {
-    let mock_service_control = MockServiceControl::new();
+    let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     // Create upgrade options with lower version
     let upgrade_options = UpgradeOptions {
@@ -227,6 +421,10 @@ async fn upgrade_all_should_skip_if_target_version_lower() -> Result<()> {
 #[tokio::test]
 async fn upgrade_all_should_force_downgrade_when_requested() -> Result<()> {
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     // Create upgrade options with force flag
     let upgrade_options = UpgradeOptions {
@@ -374,6 +572,10 @@ async fn upgrade_all_should_force_downgrade_when_requested() -> Result<()> {
 #[tokio::test]
 async fn upgrade_all_should_upgrade_and_not_start_services() -> Result<()> {
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     // Create upgrade options without starting services
     let upgrade_options = UpgradeOptions {
@@ -458,6 +660,10 @@ async fn upgrade_all_should_upgrade_and_not_start_services() -> Result<()> {
 #[tokio::test]
 async fn upgrade_all_should_handle_start_failures_after_upgrade() -> Result<()> {
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     let upgrade_options = UpgradeOptions {
         auto_restart: false,
@@ -588,6 +794,10 @@ async fn upgrade_all_should_handle_start_failures_after_upgrade() -> Result<()> 
 #[tokio::test]
 async fn upgrade_all_should_upgrade_user_mode_services() -> Result<()> {
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     let upgrade_options = UpgradeOptions {
         auto_restart: false,
@@ -742,6 +952,10 @@ async fn upgrade_all_should_set_metrics_port_if_not_set() -> Result<()> {
     current_install_dir.create_dir_all()?;
 
     let mut mock_service_control = MockServiceControl::new();
+    mock_service_control
+        .expect_service_definition_has_metrics_port()
+        .times(0..)
+        .returning(|_, _| Ok(true));
 
     // Create upgrade options
     let upgrade_options = UpgradeOptions {

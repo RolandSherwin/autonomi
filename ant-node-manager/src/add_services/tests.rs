@@ -50,6 +50,7 @@ mock! {
         fn stop(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<()>;
         fn uninstall(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<()>;
         fn verify_process_by_pid(&self, pid: u32, expected_name: &str) -> ServiceControlResult<bool>;
+        fn service_definition_has_metrics_port(&self, service_name: &str, user_mode: bool) -> ServiceControlResult<bool>;
         fn wait(&self, delay: u64);
     }
 }
@@ -3724,6 +3725,7 @@ async fn add_node_should_return_an_error_if_duplicate_custom_metrics_port_is_use
     let tmp_data_dir = assert_fs::TempDir::new()?;
     let node_reg_path = tmp_data_dir.child("node_reg.json");
 
+    let restart_policy = RestartPolicy::OnSuccess { delay_secs: None };
     let node_registry = NodeRegistryManager::empty(node_reg_path.to_path_buf());
     node_registry
         .push_node(NodeServiceData {
@@ -4377,6 +4379,7 @@ async fn add_node_should_return_an_error_if_duplicate_custom_rpc_port_in_range_i
     let tmp_data_dir = assert_fs::TempDir::new()?;
     let node_reg_path = tmp_data_dir.child("node_reg.json");
 
+    let restart_policy = RestartPolicy::OnSuccess { delay_secs: None };
     let node_registry = NodeRegistryManager::empty(node_reg_path.to_path_buf());
     node_registry
         .push_node(NodeServiceData {
@@ -4560,7 +4563,6 @@ async fn add_node_should_not_delete_the_source_binary_if_path_arg_is_used() -> R
         write_older_cache_files: false,
         restart_policy,
         stop_on_upgrade: true,
-        write_older_cache_files: false,
     }
     .build()?;
 
